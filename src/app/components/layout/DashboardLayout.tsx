@@ -20,6 +20,7 @@ import { Logo } from '../brand/Logo';
 import { Button } from '../ui/button';
 import { cn } from '../ui/utils';
 import { Toaster } from '../ui/sonner';
+import { useAuth } from '../../contexts/AuthContext';
 
 const navItems = [
   {
@@ -59,6 +60,7 @@ export function DashboardLayout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { signOut } = useAuth();
 
   const isActive = (path: string) => {
     if (path === '/dashboard') {
@@ -67,8 +69,8 @@ export function DashboardLayout() {
     return location.pathname.startsWith(path);
   };
 
-  const handleLogout = () => {
-    // In a real app, this would clear auth tokens
+  const handleLogout = async () => {
+    await signOut();
     navigate('/');
   };
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   DollarSign, 
@@ -30,6 +30,30 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  initialProducts,
+  initialCustomers,
+  initialOrders,
+  initialRevenueSources,
+  initialSalesData,
+  getLowStockProducts,
+  getTopProductsByRevenue,
+  getTopProductsBySales,
+  getOrdersByStatus,
+  getRecentOrders,
+  getProductCategories,
+  getProductsStats,
+  getCustomerSegments,
+  getTopCustomers,
+  getCustomersStats,
+  calculateDashboardMetrics,
+  restockProduct,
+  type Product,
+  type Customer,
+  type Order,
+  type RevenueSource,
+} from '../data/dashboardData';
+import { productsApi, customersApi, ordersApi, revenueSourcesApi, initApi } from '../services/api';
 
 // Mock data for the dashboard
 const metrics = [
@@ -65,16 +89,6 @@ const metrics = [
     icon: Users,
     color: '#0F4C81',
   },
-];
-
-const salesData = [
-  { name: 'Mon', sales: 4000, orders: 24 },
-  { name: 'Tue', sales: 3000, orders: 18 },
-  { name: 'Wed', sales: 5000, orders: 32 },
-  { name: 'Thu', sales: 2780, orders: 19 },
-  { name: 'Fri', sales: 6890, orders: 42 },
-  { name: 'Sat', sales: 7390, orders: 51 },
-  { name: 'Sun', sales: 5490, orders: 35 },
 ];
 
 const lowStockItems = [
@@ -176,12 +190,21 @@ const itemVariants = {
 };
 
 export function Dashboard() {
+  // State Management using centralized data structures
+  const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [revenueSources, setRevenueSources] = useState<RevenueSource[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Dialog states
   const [isRestockDialogOpen, setIsRestockDialogOpen] = useState(false);
   const [isRevenueDialogOpen, setIsRevenueDialogOpen] = useState(false);
   const [isOrdersDialogOpen, setIsOrdersDialogOpen] = useState(false);
   const [isProductsDialogOpen, setIsProductsDialogOpen] = useState(false);
   const [isCustomersDialogOpen, setIsCustomersDialogOpen] = useState(false);
-  const [lowStockData, setLowStockData] = useState(lowStockItems);
+  
   const [restockingProduct, setRestockingProduct] = useState<{
     id: number;
     name: string;
@@ -190,18 +213,122 @@ export function Dashboard() {
     quantity: string;
   } | null>(null);
 
-  const handleRestockClick = (item: any) => {
+  // Load data from backend on mount
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Fetch all data from backend
+        const [productsData, customersData, ordersData, revenueData] = await Promise.all([
+          productsApi.getAll(),
+          customersApi.getAll(),
+          ordersApi.getAll(),
+          revenueSourcesApi.getAll(),
+        ]);
+
+        // Check if database is empty (first time load)
+        if (productsData.length === 0) {
+          console.log('Database is empty, initializing with default data...');
+          
+          // Initialize database with default data
+          await initApi.initialize({
+            products: initialProducts,
+            customers: initialCustomers,
+            orders: initialOrders,
+            revenueSources: initialRevenueSources,
+          });
+
+          // Set state with initial data
+          setProducts(initialProducts);
+          setCustomers(initialCustomers);
+          setOrders(initialOrders);
+          setRevenueSources(initialRevenueSources);
+          
+          toast.success('Database initialized successfully!');
+        } else {
+          // Load existing data from database
+          setProducts(productsData);
+          setCustomers(customersData);
+          setOrders(ordersData);
+          setRevenueSources(revenueData);
+          
+          console.log(`Loaded ${productsData.length} products, ${customersData.length} customers, ${ordersData.length} orders from database`);
+        }
+
+        setIsInitialized(true);
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+        toast.error('Failed to load dashboard data. Please refresh the page.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadDashboardData();
+  }, []);
+
+  // Computed data using helper functions
+  const dashboardMetrics = calculateDashboardMetrics(products, orders, customers, revenueSources);
+  const lowStockAlerts = getLowStockProducts(products);
+  const topProductsRevenue = getTopProductsByRevenue(products);
+  const topProductsSales = getTopProductsBySales(products);
+  const ordersByStatus = getOrdersByStatus(orders);
+  const recentOrders = getRecentOrders(orders);
+  const productCategories = getProductCategories(products);
+  const productsStats = getProductsStats(products);
+  const customerSegments = getCustomerSegments(customers);
+  const topCustomersList = getTopCustomers(customers);
+  const customersStats = getCustomersStats(customers);
+
+  // Metrics data for UI
+  const metrics = [
+    {
+      title: 'Total Revenue',
+      value: `₹${dashboardMetrics.totalRevenue.toLocaleString('en-IN')}`,
+      change: dashboardMetrics.revenueChange,
+      trend: dashboardMetrics.revenueTrend,
+      icon: DollarSign,
+      color: '#0F4C81',
+    },
+    {
+      title: 'Orders',
+      value: dashboardMetrics.totalOrders.toLocaleString('en-IN'),
+      change: dashboardMetrics.ordersChange,
+      trend: dashboardMetrics.ordersTrend,
+      icon: ShoppingCart,
+      color: '#0F4C81',
+    },
+    {
+      title: 'Products',
+      value: dashboardMetrics.totalProducts.toString(),
+      change: dashboardMetrics.productsChange,
+      trend: dashboardMetrics.productsTrend,
+      icon: Package,
+      color: '#0F4C81',
+    },
+    {
+      title: 'Customers',
+      value: dashboardMetrics.totalCustomers.toLocaleString('en-IN'),
+      change: dashboardMetrics.customersChange,
+      trend: dashboardMetrics.customersTrend,
+      icon: Users,
+      color: '#0F4C81',
+    },
+  ];
+
+  const handleRestockClick = (alert: any) => {
     setRestockingProduct({
-      id: item.id,
-      name: item.name,
-      currentStock: item.stock,
-      threshold: item.threshold,
+      id: alert.productId,
+      name: alert.productName,
+      currentStock: alert.currentStock,
+      threshold: alert.threshold,
       quantity: '',
     });
     setIsRestockDialogOpen(true);
   };
 
-  const handleRestockProduct = () => {
+  const handleRestockProduct = async () => {
     if (!restockingProduct) return;
 
     // Validate form
@@ -217,23 +344,25 @@ export function Dashboard() {
       return;
     }
 
-    // Update low stock data
-    setLowStockData(lowStockData.map(item => {
-      if (item.id === restockingProduct.id) {
-        return {
-          ...item,
-          stock: item.stock + stockNum,
-        };
-      }
-      return item;
-    }));
+    try {
+      // Update product in backend
+      const updatedProduct = await productsApi.restock(restockingProduct.id, stockNum);
+      
+      // Update local state
+      setProducts(products.map(p => 
+        p.id === restockingProduct.id ? updatedProduct : p
+      ));
 
-    // Close dialog and reset
-    setIsRestockDialogOpen(false);
-    setRestockingProduct(null);
+      // Close dialog and reset
+      setIsRestockDialogOpen(false);
+      setRestockingProduct(null);
 
-    // Show success message
-    toast.success(`Successfully restocked ${stockNum} units!`);
+      // Show success message
+      toast.success(`Successfully restocked ${stockNum} units of ${restockingProduct.name}!`);
+    } catch (error) {
+      console.error('Error restocking product:', error);
+      toast.error('Failed to restock product. Please try again.');
+    }
   };
 
   return (
@@ -323,7 +452,7 @@ export function Dashboard() {
                   </div>
                 </div>
                 <ResponsiveContainer width="100%" height={250}>
-                  <AreaChart data={salesData}>
+                  <AreaChart data={initialSalesData}>
                     <defs>
                       <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#0F4C81" stopOpacity={0.3}/>
@@ -332,7 +461,7 @@ export function Dashboard() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#0F4C81" opacity={0.1} />
                     <XAxis 
-                      dataKey="name" 
+                      dataKey="day" 
                       stroke="#64748B"
                       style={{ fontSize: '12px' }}
                     />
@@ -376,21 +505,21 @@ export function Dashboard() {
                   </div>
                 </div>
                 <div className="space-y-4 flex-1">
-                  {lowStockData.map((item) => (
+                  {lowStockAlerts.map((alert) => (
                     <div 
-                      key={item.id}
+                      key={alert.productId}
                       className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-[#0F4C81]/5 to-transparent border border-[#0F4C81]/10 hover:border-[#0F4C81]/20 transition-all"
                     >
                       <div className="flex-1">
-                        <p className="text-foreground mb-1">{item.name}</p>
+                        <p className="text-foreground mb-1">{alert.productName}</p>
                         <p className="text-muted-foreground">
-                          {item.stock} units left (threshold: {item.threshold})
+                          {alert.currentStock} units left (threshold: {alert.threshold})
                         </p>
                       </div>
                       <Button 
                         size="sm"
                         className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full"
-                        onClick={() => handleRestockClick(item)}
+                        onClick={() => handleRestockClick(alert)}
                       >
                         Restock
                       </Button>
@@ -433,7 +562,7 @@ export function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ordersData.recentOrders.map((order) => (
+                    {recentOrders.map((order) => (
                       <tr 
                         key={order.id}
                         className="border-b border-[#0F4C81]/5 hover:bg-[#0F4C81]/5 transition-colors"
@@ -547,10 +676,10 @@ export function Dashboard() {
             <div className="p-6 rounded-2xl bg-gradient-to-br from-[#0F4C81]/10 to-[#0F4C81]/5 border border-[#0F4C81]/20">
               <p className="text-muted-foreground mb-2">Total Revenue (This Month)</p>
               <div className="flex items-end gap-3">
-                <h2 className="text-[#0F4C81]">₹45,231</h2>
+                <h2 className="text-[#0F4C81]">₹{dashboardMetrics.totalRevenue.toLocaleString('en-IN')}</h2>
                 <div className="flex items-center gap-1 text-green-600 mb-2">
                   <TrendingUp className="w-5 h-5" />
-                  <span>+12.5%</span>
+                  <span>{dashboardMetrics.revenueChange}</span>
                 </div>
               </div>
             </div>
@@ -558,25 +687,25 @@ export function Dashboard() {
             {/* Revenue Sources */}
             <div className="space-y-4">
               <h3 className="text-foreground">Revenue Sources</h3>
-              {revenueBreakdown.map((item) => {
-                const TrendIcon = item.trend === 'up' ? TrendingUp : TrendingDown;
+              {revenueSources.map((source) => {
+                const TrendIcon = source.trend === 'up' ? TrendingUp : TrendingDown;
                 return (
                   <div 
-                    key={item.category}
+                    key={source.id}
                     className="p-4 rounded-xl bg-gradient-to-r from-[#0F4C81]/5 to-transparent border border-[#0F4C81]/10"
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex-1">
-                        <p className="text-foreground mb-1">{item.category}</p>
-                        <p className="text-muted-foreground">{item.percentage}% of total revenue</p>
+                        <p className="text-foreground mb-1">{source.category}</p>
+                        <p className="text-muted-foreground">{source.percentage}% of total revenue</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-foreground mb-1">{item.amount}</p>
+                        <p className="text-foreground mb-1">₹{source.amount.toLocaleString('en-IN')}</p>
                         <div className={`flex items-center gap-1 text-sm justify-end ${
-                          item.trend === 'up' ? 'text-green-600' : 'text-red-600'
+                          source.trend === 'up' ? 'text-green-600' : 'text-red-600'
                         }`}>
                           <TrendIcon className="w-4 h-4" />
-                          <span>{item.change}</span>
+                          <span>{source.change}</span>
                         </div>
                       </div>
                     </div>
@@ -584,7 +713,7 @@ export function Dashboard() {
                     <div className="w-full h-2 bg-[#0F4C81]/10 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-[#0F4C81] rounded-full transition-all duration-500"
-                        style={{ width: `${item.percentage}%` }}
+                        style={{ width: `${source.percentage}%` }}
                       />
                     </div>
                   </div>
@@ -596,7 +725,7 @@ export function Dashboard() {
             <div className="space-y-4">
               <h3 className="text-foreground">Top Products by Revenue</h3>
               <div className="space-y-3">
-                {topProducts.map((product, index) => (
+                {topProductsRevenue.map((product, index) => (
                   <div 
                     key={product.name}
                     className="flex items-center justify-between p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
@@ -652,7 +781,7 @@ export function Dashboard() {
             {/* Orders by Status */}
             <div className="space-y-4">
               <h3 className="text-foreground">Orders by Status</h3>
-              {ordersData.byStatus.map((item) => (
+              {ordersByStatus.map((item) => (
                 <div 
                   key={item.status}
                   className="p-4 rounded-xl bg-gradient-to-r from-[#0F4C81]/5 to-transparent border border-[#0F4C81]/10"
@@ -681,7 +810,7 @@ export function Dashboard() {
             <div className="space-y-4">
               <h3 className="text-foreground">Recent Orders</h3>
               <div className="space-y-3">
-                {ordersData.recentOrders.map((order) => (
+                {recentOrders.map((order) => (
                   <div 
                     key={order.id}
                     className="flex items-center justify-between p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
@@ -741,15 +870,15 @@ export function Dashboard() {
               <div className="grid grid-cols-3 gap-3">
                 <div className="text-center p-3 rounded-lg bg-white/50">
                   <p className="text-muted-foreground mb-1">In Stock</p>
-                  <p className="text-foreground">{productsData.inStock}</p>
+                  <p className="text-foreground">{productsStats.inStock}</p>
                 </div>
                 <div className="text-center p-3 rounded-lg bg-yellow-50">
                   <p className="text-muted-foreground mb-1">Low Stock</p>
-                  <p className="text-foreground">{productsData.lowStock}</p>
+                  <p className="text-foreground">{productsStats.lowStock}</p>
                 </div>
                 <div className="text-center p-3 rounded-lg bg-red-50">
                   <p className="text-muted-foreground mb-1">Out of Stock</p>
-                  <p className="text-foreground">{productsData.outOfStock}</p>
+                  <p className="text-foreground">{productsStats.outOfStock}</p>
                 </div>
               </div>
             </div>
@@ -757,7 +886,7 @@ export function Dashboard() {
             {/* Products by Category */}
             <div className="space-y-4">
               <h3 className="text-foreground">Products by Category</h3>
-              {productsData.categories.map((category) => (
+              {productCategories.map((category) => (
                 <div 
                   key={category.name}
                   className="p-4 rounded-xl bg-gradient-to-r from-[#0F4C81]/5 to-transparent border border-[#0F4C81]/10"
@@ -786,7 +915,7 @@ export function Dashboard() {
             <div className="space-y-4">
               <h3 className="text-foreground">Top Selling Products</h3>
               <div className="space-y-3">
-                {productsData.topSelling.map((product, index) => (
+                {topProductsSales.map((product, index) => (
                   <div 
                     key={product.name}
                     className="flex items-center justify-between p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
@@ -843,11 +972,11 @@ export function Dashboard() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="text-center p-3 rounded-lg bg-white/50">
                   <p className="text-muted-foreground mb-1">New Customers</p>
-                  <p className="text-foreground">{customersData.new}</p>
+                  <p className="text-foreground">{customersStats.new}</p>
                 </div>
                 <div className="text-center p-3 rounded-lg bg-white/50">
                   <p className="text-muted-foreground mb-1">Returning</p>
-                  <p className="text-foreground">{customersData.returning}</p>
+                  <p className="text-foreground">{customersStats.returning}</p>
                 </div>
               </div>
             </div>
@@ -855,7 +984,7 @@ export function Dashboard() {
             {/* Customer Segments */}
             <div className="space-y-4">
               <h3 className="text-foreground">Customer Segments</h3>
-              {customersData.segments.map((segment) => (
+              {customerSegments.map((segment) => (
                 <div 
                   key={segment.type}
                   className="p-4 rounded-xl bg-gradient-to-r from-[#0F4C81]/5 to-transparent border border-[#0F4C81]/10"
@@ -863,7 +992,7 @@ export function Dashboard() {
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex-1">
                       <p className="text-foreground mb-1">{segment.type}</p>
-                      <p className="text-muted-foreground">{segment.percentage}% of customers • Avg: {segment.avgSpend}</p>
+                      <p className="text-muted-foreground">{segment.percentage}% of customers • Avg: ₹{segment.avgSpend.toLocaleString('en-IN')}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-foreground">{segment.count}</p>
@@ -884,7 +1013,7 @@ export function Dashboard() {
             <div className="space-y-4">
               <h3 className="text-foreground">Top Customers</h3>
               <div className="space-y-3">
-                {customersData.topCustomers.map((customer, index) => (
+                {topCustomersList.map((customer, index) => (
                   <div 
                     key={customer.name}
                     className="flex items-center justify-between p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
