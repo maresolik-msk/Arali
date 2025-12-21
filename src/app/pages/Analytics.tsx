@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ChartLine, TrendingUp, DollarSign, ShoppingCart, Package } from 'lucide-react';
+import { ChartLine, TrendingUp, DollarSign, ShoppingCart, Package, Star, TrendingDown, Award, AlertCircle } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import {
   LineChart,
@@ -17,8 +17,8 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { productsApi, ordersApi, customersApi } from '../services/api';
-import type { Product, Order, Customer } from '../data/dashboardData';
+import { productsApi, ordersApi, customersApi, vendorsApi } from '../services/api';
+import type { Product, Order, Customer, Vendor } from '../data/dashboardData';
 import { toast } from 'sonner';
 
 interface MonthlyData {
@@ -43,12 +43,16 @@ interface AnalyticsMetrics {
   lowStockCount: number;
   pendingOrdersCount: number;
   completedOrdersCount: number;
+  topVendor: Vendor | null;
+  topProduct: Product | null;
+  topCategory: string | null;
 }
 
 export function Analytics() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [metrics, setMetrics] = useState<AnalyticsMetrics>({
     avgOrderValue: 0,
@@ -59,6 +63,9 @@ export function Analytics() {
     lowStockCount: 0,
     pendingOrdersCount: 0,
     completedOrdersCount: 0,
+    topVendor: null,
+    topProduct: null,
+    topCategory: null,
   });
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [categoryData, setCategoryData] = useState<CategoryData[]>([]);
@@ -70,19 +77,21 @@ export function Analytics() {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [productsData, ordersData] = await Promise.all([
+      const [productsData, vendorsData] = await Promise.all([
         productsApi.getAll(),
-        ordersApi.getAll(),
+        vendorsApi.getAll(),
       ]);
 
       setProducts(productsData);
-      setOrders(ordersData);
-      setCustomers([]); // Customers feature disabled for now
+      setOrders([]); // Orders feature disabled
+      setCustomers([]); // Customers feature disabled
+      setVendors(vendorsData);
 
       // Calculate metrics
-      calculateMetrics(productsData, ordersData, []);
-      calculateMonthlyData(ordersData);
-      calculateCategoryData(productsData, ordersData);
+      calculateMetrics(productsData, [], []);
+      calculateMonthlyData([]);
+      calculateCategoryData(productsData, []);
+      // Skip top vendor/product/category calculations since they need orders
     } catch (error: any) {
       console.error('Error loading analytics data:', error);
       toast.error('Failed to load analytics data');
@@ -112,6 +121,9 @@ export function Analytics() {
       lowStockCount,
       pendingOrdersCount,
       completedOrdersCount,
+      topVendor: null,
+      topProduct: null,
+      topCategory: null,
     });
   };
 
@@ -196,6 +208,85 @@ export function Analytics() {
     }
   };
 
+  const calculateTopVendor = (vendorsData: Vendor[], ordersData: Order[]) => {
+    const vendorMap: { [key: string]: { revenue: number; orders: number } } = {};
+    
+    // Calculate revenue by vendor from orders
+    ordersData.forEach(order => {
+      const vendor = vendorsData.find(v => v.id === order.vendorId);
+      if (vendor) {
+        if (!vendorMap[vendor.name]) {
+          vendorMap[vendor.name] = { revenue: 0, orders: 0 };
+        }
+        vendorMap[vendor.name].revenue += order.total;
+        vendorMap[vendor.name].orders += 1;
+      }
+    });
+
+    // Find top vendor
+    const topVendor = Object.entries(vendorMap)
+      .reduce((prev, current) => (current[1].revenue > prev[1].revenue ? current : prev), ['No Vendor', { revenue: 0, orders: 0 }]);
+    
+    setMetrics(prev => ({
+      ...prev,
+      topVendor: topVendor[0] !== 'No Vendor' ? vendorsData.find(v => v.name === topVendor[0]) || null : null,
+    }));
+  };
+
+  const calculateTopProduct = (productsData: Product[], ordersData: Order[]) => {
+    const productMap: { [key: string]: { revenue: number; orders: number } } = {};
+    
+    // Calculate revenue by product from orders
+    ordersData.forEach(order => {
+      order.items.forEach(item => {
+        const product = productsData.find(p => p.id === item.productId);
+        if (product) {
+          if (!productMap[product.name]) {
+            productMap[product.name] = { revenue: 0, orders: 0 };
+          }
+          productMap[product.name].revenue += item.price * item.quantity;
+          productMap[product.name].orders += 1;
+        }
+      });
+    });
+
+    // Find top product
+    const topProduct = Object.entries(productMap)
+      .reduce((prev, current) => (current[1].revenue > prev[1].revenue ? current : prev), ['No Product', { revenue: 0, orders: 0 }]);
+    
+    setMetrics(prev => ({
+      ...prev,
+      topProduct: topProduct[0] !== 'No Product' ? productsData.find(p => p.name === topProduct[0]) || null : null,
+    }));
+  };
+
+  const calculateTopCategory = (productsData: Product[], ordersData: Order[]) => {
+    const categoryMap: { [key: string]: { count: number; revenue: number } } = {};
+    
+    // Calculate revenue by category from orders
+    ordersData.forEach(order => {
+      order.items.forEach(item => {
+        const product = productsData.find(p => p.id === item.productId);
+        if (product) {
+          if (!categoryMap[product.category]) {
+            categoryMap[product.category] = { count: 0, revenue: 0 };
+          }
+          categoryMap[product.category].count += item.quantity;
+          categoryMap[product.category].revenue += item.price * item.quantity;
+        }
+      });
+    });
+
+    // Find top category
+    const topCategory = Object.entries(categoryMap)
+      .reduce((prev, current) => (current[1].revenue > prev[1].revenue ? current : prev), ['No Category', { count: 0, revenue: 0 }]);
+    
+    setMetrics(prev => ({
+      ...prev,
+      topCategory: topCategory[0] !== 'No Category' ? topCategory[0] : null,
+    }));
+  };
+
   // Calculate growth rate (comparing last 2 months)
   const calculateGrowthRate = () => {
     if (monthlyData.length < 2) return 0;
@@ -239,69 +330,8 @@ export function Analytics() {
           <p className="text-muted-foreground">Deep insights into your business performance</p>
         </div>
 
-        {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-[#0F4C81]/5">
-                <DollarSign className="w-6 h-6 text-[#0F4C81]" />
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1">Avg Order Value</p>
-                <h3 className="text-foreground">₹{metrics.avgOrderValue.toFixed(2)}</h3>
-              </div>
-            </div>
-          </Card>
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-green-500/10">
-                <TrendingUp className="w-6 h-6 text-green-600" />
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1">Growth Rate</p>
-                <h3 className={`text-foreground ${growthRate >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {growthRate >= 0 ? '+' : ''}{growthRate.toFixed(1)}%
-                </h3>
-              </div>
-            </div>
-          </Card>
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-blue-500/10">
-                <ShoppingCart className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1">Total Orders</p>
-                <h3 className="text-foreground">{metrics.totalOrders}</h3>
-              </div>
-            </div>
-          </Card>
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-purple-500/10">
-                <ChartLine className="w-6 h-6 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1">Customer LTV</p>
-                <h3 className="text-foreground">₹{customerLTV.toFixed(0)}</h3>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Additional Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-[#0F4C81]/5">
-                <DollarSign className="w-6 h-6 text-[#0F4C81]" />
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1">Total Revenue</p>
-                <h3 className="text-foreground">₹{metrics.totalRevenue.toFixed(2)}</h3>
-              </div>
-            </div>
-          </Card>
+        {/* Key Metrics - Product & Vendor Only */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-2xl bg-orange-500/10">
@@ -316,7 +346,7 @@ export function Analytics() {
           <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
             <div className="flex items-center gap-4">
               <div className="p-3 rounded-2xl bg-red-500/10">
-                <Package className="w-6 h-6 text-red-600" />
+                <AlertCircle className="w-6 h-6 text-red-600" />
               </div>
               <div>
                 <p className="text-muted-foreground mb-1">Low Stock Items</p>
@@ -326,143 +356,316 @@ export function Analytics() {
           </Card>
           <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
             <div className="flex items-center gap-4">
-              <div className="p-3 rounded-2xl bg-blue-500/10">
-                <ShoppingCart className="w-6 h-6 text-blue-600" />
+              <div className="p-3 rounded-2xl bg-[#0F4C81]/5">
+                <Star className="w-6 h-6 text-[#0F4C81]" />
               </div>
               <div>
-                <p className="text-muted-foreground mb-1">Pending Orders</p>
-                <h3 className="text-foreground">{metrics.pendingOrdersCount}</h3>
+                <p className="text-muted-foreground mb-1">Total Vendors</p>
+                <h3 className="text-foreground">{vendors.length}</h3>
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Revenue Trend */}
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
-            <div className="relative p-6">
-              <h3 className="text-foreground mb-6">Revenue Trend (Last 12 Months)</h3>
-              {monthlyData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={monthlyData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#0F4C81" opacity={0.1} />
-                    <XAxis 
-                      dataKey="month" 
-                      stroke="#64748B"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <YAxis 
-                      stroke="#64748B"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        border: '1px solid rgba(15, 76, 129, 0.1)',
-                        borderRadius: '12px',
-                        padding: '12px'
-                      }}
-                      formatter={(value: any) => `₹${value}`}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="revenue" 
-                      stroke="#0F4C81" 
-                      strokeWidth={3}
-                      dot={{ fill: '#0F4C81', r: 4 }}
-                      activeDot={{ r: 6 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                  No revenue data available
-                </div>
-              )}
+        {/* Inventory Value Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 rounded-2xl bg-orange-500/10">
+                <DollarSign className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-muted-foreground mb-1">Total Investment</p>
+                <h3 className="text-foreground">
+                  ₹{products.reduce((sum, p) => sum + ((p.costPrice || 0) * p.stock), 0).toFixed(2)}
+                </h3>
+              </div>
             </div>
           </Card>
-
-          {/* Sales by Category */}
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
-            <div className="relative p-6">
-              <h3 className="text-foreground mb-6">Sales by Category</h3>
-              {categoryData.length > 0 && categoryData[0].name !== 'No Data' ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, value }) => `${name} ${value}%`}
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {categoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      formatter={(value: any, name: any, props: any) => [
-                        `₹${props.payload.revenue} (${value}%)`,
-                        'Revenue'
-                      ]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                  No category data available
-                </div>
-              )}
+          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 rounded-2xl bg-green-500/10">
+                <TrendingUp className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <p className="text-muted-foreground mb-1">Total Earnings</p>
+                <h3 className="text-foreground text-green-600">
+                  ₹{products.reduce((sum, p) => sum + (p.price * (p.sold || 0)), 0).toFixed(2)}
+                </h3>
+              </div>
             </div>
           </Card>
-
-          {/* Monthly Orders */}
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden lg:col-span-2">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
-            <div className="relative p-6">
-              <h3 className="text-foreground mb-6">Monthly Orders</h3>
-              {monthlyData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={monthlyData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#0F4C81" opacity={0.1} />
-                    <XAxis 
-                      dataKey="month" 
-                      stroke="#64748B"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <YAxis 
-                      stroke="#64748B"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        border: '1px solid rgba(15, 76, 129, 0.1)',
-                        borderRadius: '12px',
-                        padding: '12px'
-                      }}
-                    />
-                    <Bar 
-                      dataKey="orders" 
-                      fill="#0F4C81"
-                      radius={[8, 8, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                  No order data available
-                </div>
-              )}
+          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 rounded-2xl bg-[#0F4C81]/5">
+                <ChartLine className="w-6 h-6 text-[#0F4C81]" />
+              </div>
+              <div>
+                <p className="text-muted-foreground mb-1">Total Profit</p>
+                <h3 className="text-foreground text-green-600">
+                  ₹{products.reduce((sum, p) => {
+                    const earnings = p.price * (p.sold || 0);
+                    const cost = (p.costPrice || 0) * (p.sold || 0);
+                    return sum + (earnings - cost);
+                  }, 0).toFixed(2)}
+                </h3>
+              </div>
             </div>
           </Card>
         </div>
+
+        {/* Product Performance */}
+        <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
+          <div className="relative p-6">
+            <h3 className="text-foreground mb-6">Product Performance</h3>
+            <div className="space-y-4">
+              {products.length > 0 ? (
+                products
+                  .sort((a, b) => (b.price * b.stock) - (a.price * a.stock))
+                  .slice(0, 10)
+                  .map((product, index) => {
+                    const totalValue = product.price * product.stock;
+                    const totalSales = product.price * (product.sold || 0);
+                    const profitMargin = product.price - (product.costPrice || 0);
+                    const profitPercentage = product.costPrice ? ((profitMargin / product.costPrice) * 100) : 0;
+                    
+                    return (
+                      <div 
+                        key={product.id} 
+                        className="p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10 hover:bg-[#0F4C81]/10 transition-colors"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-[#0F4C81]/10 flex items-center justify-center">
+                              <span className="text-[#0F4C81]">#{index + 1}</span>
+                            </div>
+                            <div>
+                              <p className="text-foreground">{product.name}</p>
+                              <p className="text-muted-foreground">{product.category}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-foreground">₹{product.price.toFixed(2)}</p>
+                            <p className="text-muted-foreground">{product.stock} in stock</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-[#0F4C81]/10">
+                          <div>
+                            <p className="text-muted-foreground mb-1">Total Value</p>
+                            <p className="text-[#0F4C81]">₹{totalValue.toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground mb-1">Total Sales</p>
+                            <p className="text-green-600">₹{totalSales.toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground mb-1">Profit Margin</p>
+                            <p className={profitPercentage >= 0 ? 'text-green-600' : 'text-red-600'}>
+                              {profitPercentage.toFixed(1)}%
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  No products available
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* Vendor Analytics */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
+            <div className="relative p-6">
+              <h3 className="text-foreground mb-6">Vendor Frequency</h3>
+              <div className="space-y-4">
+                {vendors.length > 0 ? (
+                  vendors
+                    .sort((a, b) => (b.totalProducts || 0) - (a.totalProducts || 0))
+                    .slice(0, 5)
+                    .map((vendor, index) => (
+                      <div 
+                        key={vendor.id} 
+                        className="p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-[#0F4C81]/10 flex items-center justify-center">
+                              <span className="text-[#0F4C81]">#{index + 1}</span>
+                            </div>
+                            <div>
+                              <p className="text-foreground">{vendor.name}</p>
+                              <p className="text-muted-foreground">{vendor.email}</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 mt-3 pt-3 border-t border-[#0F4C81]/10">
+                          <div>
+                            <p className="text-muted-foreground mb-1">Total Products</p>
+                            <p className="text-[#0F4C81]">{vendor.totalProducts || 0}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground mb-1">Total Purchases</p>
+                            <p className="text-green-600">₹{(vendor.totalPurchases || 0).toFixed(2)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No vendors available
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
+            <div className="relative p-6">
+              <h3 className="text-foreground mb-6">Vendor Ratings</h3>
+              <div className="space-y-4">
+                {vendors.length > 0 ? (
+                  vendors
+                    .filter(v => v.rating !== undefined)
+                    .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+                    .slice(0, 5)
+                    .map((vendor, index) => (
+                      <div 
+                        key={vendor.id} 
+                        className="p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 flex-1">
+                            <div className="w-8 h-8 rounded-full bg-[#0F4C81]/10 flex items-center justify-center">
+                              <span className="text-[#0F4C81]">#{index + 1}</span>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-foreground">{vendor.name}</p>
+                              <p className="text-muted-foreground">{vendor.company || 'N/A'}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
+                            <span className="text-foreground">
+                              {(vendor.rating || 0).toFixed(1)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No vendor ratings available
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Revenue Management */}
+        <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
+          <div className="relative p-6">
+            <h3 className="text-foreground mb-6">Revenue Management - Investment vs Earnings</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[#0F4C81]/10">
+                    <th className="text-left py-3 px-4 text-muted-foreground">Product</th>
+                    <th className="text-left py-3 px-4 text-muted-foreground">Category</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Cost Price</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Selling Price</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Investment</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Earnings</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Profit</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.length > 0 ? (
+                    products.map((product) => {
+                      const costPrice = product.costPrice || 0;
+                      const sellingPrice = product.price;
+                      const totalInvestment = costPrice * product.stock;
+                      const totalEarnings = sellingPrice * (product.sold || 0);
+                      const totalProfit = totalEarnings - (costPrice * (product.sold || 0));
+                      const profitMargin = costPrice > 0 ? ((sellingPrice - costPrice) / costPrice * 100) : 0;
+                      
+                      return (
+                        <tr 
+                          key={product.id} 
+                          className="border-b border-[#0F4C81]/5 hover:bg-[#0F4C81]/5 transition-colors"
+                        >
+                          <td className="py-3 px-4">
+                            <p className="text-foreground">{product.name}</p>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="px-3 py-1 rounded-full bg-[#0F4C81]/10 text-[#0F4C81] text-sm">
+                              {product.category}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right text-muted-foreground">
+                            ₹{costPrice.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-right text-foreground">
+                            ₹{sellingPrice.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-right text-orange-600">
+                            ₹{totalInvestment.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-right text-green-600">
+                            ₹{totalEarnings.toFixed(2)}
+                          </td>
+                          <td className={`py-3 px-4 text-right ${totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            ₹{totalProfit.toFixed(2)}
+                          </td>
+                          <td className={`py-3 px-4 text-right ${profitMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {profitMargin.toFixed(1)}%
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                        No products available
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+                {products.length > 0 && (
+                  <tfoot className="border-t-2 border-[#0F4C81]/20 font-medium">
+                    <tr>
+                      <td colSpan={4} className="py-3 px-4 text-foreground">Total</td>
+                      <td className="py-3 px-4 text-right text-orange-600">
+                        ₹{products.reduce((sum, p) => sum + ((p.costPrice || 0) * p.stock), 0).toFixed(2)}
+                      </td>
+                      <td className="py-3 px-4 text-right text-green-600">
+                        ₹{products.reduce((sum, p) => sum + (p.price * (p.sold || 0)), 0).toFixed(2)}
+                      </td>
+                      <td className="py-3 px-4 text-right text-green-600">
+                        ₹{products.reduce((sum, p) => {
+                          const earnings = p.price * (p.sold || 0);
+                          const cost = (p.costPrice || 0) * (p.sold || 0);
+                          return sum + (earnings - cost);
+                        }, 0).toFixed(2)}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </Card>
       </motion.div>
     </div>
   );

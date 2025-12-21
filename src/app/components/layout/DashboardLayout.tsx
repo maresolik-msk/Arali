@@ -84,8 +84,13 @@ export function DashboardLayout() {
     try {
       const count = await notificationsApi.getUnreadCount();
       setUnreadCount(count);
-    } catch (error) {
-      console.error('Failed to load unread count:', error);
+    } catch (error: any) {
+      // Silently fail - notifications may not be initialized yet
+      // Only log in development
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Failed to load unread count:', error);
+      }
+      setUnreadCount(0);
     }
   };
 

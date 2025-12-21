@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  DollarSign, 
+  IndianRupee, 
   ShoppingCart, 
   Package, 
   Users, 
@@ -63,7 +63,7 @@ const metrics = [
     value: '₹45,231',
     change: '+12.5%',
     trend: 'up',
-    icon: DollarSign,
+    icon: IndianRupee,
     color: '#0F4C81',
   },
   {
@@ -313,22 +313,14 @@ export function Dashboard() {
   const topCustomersList = getTopCustomers(customers);
   const customersStats = getCustomersStats(customers);
 
-  // Metrics data for UI
+  // Metrics data for UI - Only showing Products and Revenue (Orders and Customers features disabled)
   const metrics = [
     {
       title: 'Total Revenue',
       value: `₹${dashboardMetrics.totalRevenue.toLocaleString('en-IN')}`,
       change: dashboardMetrics.revenueChange,
       trend: dashboardMetrics.revenueTrend,
-      icon: DollarSign,
-      color: '#0F4C81',
-    },
-    {
-      title: 'Orders',
-      value: dashboardMetrics.totalOrders.toLocaleString('en-IN'),
-      change: dashboardMetrics.ordersChange,
-      trend: dashboardMetrics.ordersTrend,
-      icon: ShoppingCart,
+      icon: IndianRupee,
       color: '#0F4C81',
     },
     {
@@ -337,14 +329,6 @@ export function Dashboard() {
       change: dashboardMetrics.productsChange,
       trend: dashboardMetrics.productsTrend,
       icon: Package,
-      color: '#0F4C81',
-    },
-    {
-      title: 'Customers',
-      value: dashboardMetrics.totalCustomers.toLocaleString('en-IN'),
-      change: dashboardMetrics.customersChange,
-      trend: dashboardMetrics.customersTrend,
-      icon: Users,
       color: '#0F4C81',
     },
   ];
@@ -563,65 +547,7 @@ export function Dashboard() {
           </motion.div>
         </div>
 
-        {/* Recent Orders */}
-        <motion.div variants={itemVariants}>
-          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
-            <div className="relative p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-foreground mb-1">Recent Orders</h3>
-                  <p className="text-muted-foreground">Latest transactions from your store</p>
-                </div>
-                <Link to="/dashboard/orders">
-                  <Button 
-                    variant="outline"
-                    className="border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
-                  >
-                    View All
-                  </Button>
-                </Link>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-[#0F4C81]/10">
-                      <th className="text-left py-3 px-4 text-muted-foreground">Order ID</th>
-                      <th className="text-left py-3 px-4 text-muted-foreground">Customer</th>
-                      <th className="text-left py-3 px-4 text-muted-foreground">Amount</th>
-                      <th className="text-left py-3 px-4 text-muted-foreground">Status</th>
-                      <th className="text-left py-3 px-4 text-muted-foreground">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentOrders.map((order) => (
-                      <tr 
-                        key={order.id}
-                        className="border-b border-[#0F4C81]/5 hover:bg-[#0F4C81]/5 transition-colors"
-                      >
-                        <td className="py-4 px-4 text-foreground">{order.id}</td>
-                        <td className="py-4 px-4 text-foreground">{order.customer}</td>
-                        <td className="py-4 px-4 text-foreground">{order.amount}</td>
-                        <td className="py-4 px-4">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-                            order.status === 'Completed' 
-                              ? 'bg-green-100 text-green-700' 
-                              : order.status === 'Processing'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-yellow-100 text-yellow-700'
-                          }`}>
-                            {order.status}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-muted-foreground">{order.time}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
+        {/* Recent Orders - Hidden (Orders feature disabled) */}
       </motion.div>
 
       {/* Restock Dialog */}
@@ -699,7 +625,7 @@ export function Dashboard() {
         <DialogContent className="sm:max-w-[700px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
-              <DollarSign className="w-5 h-5" />
+              <IndianRupee className="w-5 h-5" />
               Revenue Breakdown
             </DialogTitle>
           </DialogHeader>
@@ -794,80 +720,32 @@ export function Dashboard() {
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <ShoppingCart className="w-5 h-5" />
-              Orders Overview
+              Orders
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-6 py-4">
-            {/* Total Orders Summary */}
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-[#0F4C81]/10 to-[#0F4C81]/5 border border-[#0F4C81]/20">
-              <p className="text-muted-foreground mb-2">Total Orders (This Month)</p>
-              <div className="flex items-end gap-3">
-                <h2 className="text-[#0F4C81]">{dashboardMetrics.totalOrders.toLocaleString('en-IN')}</h2>
-                <div className="flex items-center gap-1 text-green-600 mb-2">
-                  <TrendingUp className="w-5 h-5" />
-                  <span>{dashboardMetrics.ordersChange}</span>
-                </div>
+          
+          {/* Coming Soon Content */}
+          <div className="py-12 text-center space-y-4">
+            <div className="relative inline-block">
+              <div className="absolute inset-0 bg-[#0F4C81]/10 rounded-full blur-2xl animate-pulse" />
+              <div className="relative p-6 rounded-full bg-gradient-to-br from-[#0F4C81]/10 to-[#0F4C81]/5">
+                <ShoppingCart className="w-12 h-12 text-[#0F4C81]" />
               </div>
             </div>
-
-            {/* Orders by Status */}
-            <div className="space-y-4">
-              <h3 className="text-foreground">Orders by Status</h3>
-              {ordersByStatus.map((item) => (
-                <div 
-                  key={item.status}
-                  className="p-4 rounded-xl bg-gradient-to-r from-[#0F4C81]/5 to-transparent border border-[#0F4C81]/10"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex-1">
-                      <p className="text-foreground mb-1">{item.status}</p>
-                      <p className="text-muted-foreground">{item.percentage}% of total orders</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-foreground mb-1">{item.count} orders</p>
-                    </div>
-                  </div>
-                  {/* Progress Bar */}
-                  <div className="w-full h-2 bg-[#0F4C81]/10 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
-                    />
-                  </div>
-                </div>
-              ))}
+            
+            <div>
+              <h3 className="text-[#0F4C81] mb-2">Order Management Coming Soon</h3>
+              <p className="text-muted-foreground max-w-md mx-auto">
+                We're building a comprehensive order management system. Process orders efficiently, track fulfillment status, and provide excellent customer service.
+              </p>
             </div>
-
-            {/* Recent Orders */}
-            <div className="space-y-4">
-              <h3 className="text-foreground">Recent Orders</h3>
-              <div className="space-y-3">
-                {recentOrders.map((order) => (
-                  <div 
-                    key={order.id}
-                    className="flex items-center justify-between p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
-                  >
-                    <div className="flex-1">
-                      <p className="text-foreground mb-1">{order.id} - {order.customer}</p>
-                      <p className="text-muted-foreground">{order.items} items • {order.time}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-foreground mb-1">{order.amount}</p>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${
-                        order.status === 'Completed' 
-                          ? 'bg-green-100 text-green-700' 
-                          : order.status === 'Processing'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-yellow-100 text-yellow-700'
-                      }`}>
-                        {order.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            
+            <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-[#0F4C81]/10 to-[#0F4C81]/5 border border-[#0F4C81]/20">
+              <CircleAlert className="w-4 h-4 text-[#0F4C81]" />
+              <span className="text-[#0F4C81] font-medium">Under Development</span>
             </div>
           </div>
+
           <div className="flex gap-3 pt-2">
             <Button 
               className="flex-1 bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/30"

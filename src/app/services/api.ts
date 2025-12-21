@@ -53,11 +53,15 @@ async function apiRequest<T>(
         errorMessage = errorText || `Request failed with status ${response.status}`;
       }
       
-      console.error(`API Error (${endpoint}):`, {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorMessage,
-      });
+      // Only log errors in development or for critical endpoints
+      const isCriticalEndpoint = !endpoint.includes('unread-count');
+      if (process.env.NODE_ENV === 'development' || isCriticalEndpoint) {
+        console.error(`API Error (${endpoint}):`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorMessage,
+        });
+      }
       
       // Handle authentication errors
       if (response.status === 401) {
@@ -81,7 +85,11 @@ async function apiRequest<T>(
     
     return JSON.parse(responseText);
   } catch (error) {
-    console.error(`API Request failed (${endpoint}):`, error);
+    // Only log fetch errors in development or for critical endpoints
+    const isCriticalEndpoint = !endpoint.includes('unread-count');
+    if (process.env.NODE_ENV === 'development' || isCriticalEndpoint) {
+      console.error(`API Request failed (${endpoint}):`, error);
+    }
     throw error;
   }
 }
