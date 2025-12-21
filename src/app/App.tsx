@@ -1,5 +1,5 @@
 import React from 'react';
-import { createBrowserRouter, RouterProvider, Navigate, useRouteError, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { Home } from './pages/Home';
@@ -17,152 +17,114 @@ import { Customers } from './pages/Customers';
 import { Vendors } from './pages/Vendors';
 import { Analytics } from './pages/Analytics';
 import { DashboardSettings } from './pages/DashboardSettings';
+import { AIInsights } from './pages/AIInsights';
+import { ProductDetail } from './pages/ProductDetail';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from 'sonner';
 
-// Error Boundary Component
-function ErrorBoundary() {
-  const error = useRouteError();
-  console.error('Route error:', error);
-  
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#F5F9FC] via-[#EBF4FA] to-[#F5F9FC]">
-      <div className="max-w-md w-full mx-4">
-        <div className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/20 rounded-2xl p-8 shadow-2xl text-center">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-red-600 text-2xl">!</span>
-          </div>
-          <h2 className="text-[#0F4C81] mb-2">Oops! Something went wrong</h2>
-          <p className="text-muted-foreground mb-6">
-            We encountered an error while loading this page.
-          </p>
-          <button
-            onClick={() => window.location.href = '/'}
-            className="px-6 py-3 bg-[#0F4C81] text-white rounded-full hover:bg-[#0F4C81]/90 transition-colors"
-          >
-            Go to Home
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// Arali - Premium Retail Management App v2.2 - Fixed AuthProvider context
+// Last updated: December 21, 2024
 
 // Protected Route Component
-function ProtectedRoute() {
-  const { isAuthenticated, isLoading } = useAuth();
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  // Add error boundary for hot reload issues
+  try {
+    const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
+    if (isLoading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="w-16 h-16 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin" />
+        </div>
+      );
+    }
+
+    if (!isAuthenticated) {
+      return <Navigate to="/login" replace />;
+    }
+
+    return <>{children}</>;
+  } catch (error) {
+    console.error('ProtectedRoute error:', error);
+    // Fallback to login on any error
+    return <Navigate to="/login" replace />;
+  }
+}
+
+// Login Route Component - redirects to dashboard if already authenticated
+function LoginRoute() {
+  try {
+    const { isAuthenticated, isLoading } = useAuth();
+
+    if (isLoading) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="w-16 h-16 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin" />
+        </div>
+      );
+    }
+
+    if (isAuthenticated) {
+      return <Navigate to="/dashboard" replace />;
+    }
+
+    return <Login />;
+  } catch (error) {
+    console.error('LoginRoute error:', error);
+    // During hot reload, the context might be temporarily unavailable
+    // Show a loading state and reload will fix it
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-16 h-16 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0F4C81]/5 via-white to-[#0F4C81]/5">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[#0F4C81]/60">Loading authentication...</p>
+        </div>
       </div>
     );
   }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <Outlet />;
 }
-
-// Root component to provide context
-function Root() {
-  return (
-    <AuthProvider>
-      <Outlet />
-      <Toaster />
-    </AuthProvider>
-  );
-}
-
-const router = createBrowserRouter([
-  {
-    element: <Root />,
-    errorElement: <ErrorBoundary />,
-    children: [
-      {
-        path: "/login",
-        element: <Login />,
-      },
-      {
-        path: "/",
-        element: <Layout />,
-        children: [
-          {
-            index: true,
-            element: <Home />,
-          },
-          {
-            path: "how-it-works",
-            element: <HowItWorks />,
-          },
-          {
-            path: "features",
-            element: <Features />,
-          },
-          {
-            path: "why-arali",
-            element: <WhyArali />,
-          },
-          {
-            path: "story",
-            element: <Story />,
-          },
-          {
-            path: "faq",
-            element: <FAQ />,
-          },
-          {
-            path: "get-started",
-            element: <GetStarted />,
-          },
-        ],
-      },
-      {
-        path: "/dashboard",
-        element: <ProtectedRoute />,
-        children: [
-          {
-            element: <DashboardLayout />,
-            children: [
-              {
-                index: true,
-                element: <Dashboard />,
-              },
-              {
-                path: "inventory",
-                element: <Inventory />,
-              },
-              {
-                path: "orders",
-                element: <Orders />,
-              },
-              {
-                path: "customers",
-                element: <Customers />,
-              },
-              {
-                path: "vendors",
-                element: <Vendors />,
-              },
-              {
-                path: "analytics",
-                element: <Analytics />,
-              },
-              {
-                path: "settings",
-                element: <DashboardSettings />,
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-]);
 
 export default function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Login Route */}
+          <Route path="/login" element={<LoginRoute />} />
+          
+          {/* Public Routes */}
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Home />} />
+            <Route path="how-it-works" element={<HowItWorks />} />
+            <Route path="features" element={<Features />} />
+            <Route path="why-arali" element={<WhyArali />} />
+            <Route path="story" element={<Story />} />
+            <Route path="faq" element={<FAQ />} />
+            <Route path="get-started" element={<GetStarted />} />
+          </Route>
+
+          {/* Protected Dashboard Routes */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="inventory" element={<Inventory />} />
+            <Route path="inventory/:productId" element={<ProductDetail />} />
+            <Route path="orders" element={<Orders />} />
+            <Route path="customers" element={<Customers />} />
+            <Route path="vendors" element={<Vendors />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="ai-insights" element={<AIInsights />} />
+            <Route path="settings" element={<DashboardSettings />} />
+          </Route>
+        </Routes>
+        <Toaster />
+      </BrowserRouter>
+    </AuthProvider>
+  );
 }

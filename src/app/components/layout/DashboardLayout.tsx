@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Store,
   Truck,
+  Sparkles,
 } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { Button } from '../ui/button';
@@ -57,6 +58,11 @@ const navItems = [
     icon: ChartLine,
   },
   {
+    title: 'AI Insights',
+    href: '/dashboard/ai-insights',
+    icon: Sparkles,
+  },
+  {
     title: 'Settings',
     href: '/dashboard/settings',
     icon: Settings,
@@ -70,26 +76,28 @@ export function DashboardLayout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { signOut, isAuthenticated, isLoading } = useAuth();
 
-  // Load unread notification count
+  // Load unread notification count - only after auth is ready
   useEffect(() => {
+    // Don't make API calls until auth is loaded and user is authenticated
+    if (isLoading || !isAuthenticated) {
+      return;
+    }
+
     loadUnreadCount();
-    // Poll for updates every 30 seconds
-    const interval = setInterval(loadUnreadCount, 30000);
+    // Poll for updates every 60 seconds (increased from 30)
+    const interval = setInterval(loadUnreadCount, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isLoading, isAuthenticated]);
 
   const loadUnreadCount = async () => {
     try {
       const count = await notificationsApi.getUnreadCount();
       setUnreadCount(count);
     } catch (error: any) {
-      // Silently fail - notifications may not be initialized yet
-      // Only log in development
-      if (process.env.NODE_ENV === 'development') {
-        console.error('Failed to load unread count:', error);
-      }
+      // Silently fail - notifications may not be initialized yet or user not authenticated
+      // Don't log to avoid console spam
       setUnreadCount(0);
     }
   };
@@ -112,7 +120,7 @@ export function DashboardLayout() {
 
   const handleLogout = async () => {
     await signOut();
-    navigate('/');
+    // Navigation is now handled by the signOut function in AuthContext
   };
 
   return (

@@ -12,6 +12,7 @@ export interface Product {
   alertEnabled: boolean; // Enable/disable low stock alerts
   sku: string;
   description?: string;
+  imageUrl?: string; // Product image URL
   vendorType?: string; // Type/name of vendor
   unitsSold: number;
   revenue: number;
@@ -161,6 +162,7 @@ export const initialProducts: Product[] = [
     alertEnabled: true,
     sku: 'BEV-001',
     description: 'Premium organic coffee beans from Karnataka',
+    imageUrl: 'https://example.com/images/coffee-beans.jpg',
     vendorType: 'Karnataka Coffee Co.',
     unitsSold: 340,
     revenue: 153000,
@@ -179,6 +181,7 @@ export const initialProducts: Product[] = [
     alertEnabled: true,
     sku: 'DAI-001',
     description: 'Fresh Greek yogurt with probiotics',
+    imageUrl: 'https://example.com/images/greek-yogurt.jpg',
     vendorType: 'Dairy Farm',
     unitsSold: 1050,
     revenue: 126000,
@@ -197,6 +200,7 @@ export const initialProducts: Product[] = [
     alertEnabled: true,
     sku: 'GRO-001',
     description: 'Extra virgin olive oil',
+    imageUrl: 'https://example.com/images/olive-oil.jpg',
     vendorType: 'Olive Oil Mill',
     unitsSold: 306,
     revenue: 198900,
@@ -215,6 +219,7 @@ export const initialProducts: Product[] = [
     alertEnabled: true,
     sku: 'GRO-002',
     description: 'Organic brown rice',
+    imageUrl: 'https://example.com/images/brown-rice.jpg',
     vendorType: 'Rice Farm',
     unitsSold: 347,
     revenue: 62460,
@@ -233,6 +238,7 @@ export const initialProducts: Product[] = [
     alertEnabled: true,
     sku: 'BEV-002',
     description: 'Unsweetened almond milk',
+    imageUrl: 'https://example.com/images/almond-milk.jpg',
     vendorType: 'Almond Milk Co.',
     unitsSold: 245,
     revenue: 53900,
@@ -251,6 +257,7 @@ export const initialProducts: Product[] = [
     alertEnabled: true,
     sku: 'BAK-001',
     description: 'Fresh whole wheat bread',
+    imageUrl: 'https://example.com/images/whole-wheat-bread.jpg',
     vendorType: 'Bakery',
     unitsSold: 678,
     revenue: 30510,
@@ -269,6 +276,7 @@ export const initialProducts: Product[] = [
     alertEnabled: true,
     sku: 'VEG-001',
     description: 'Fresh organic spinach',
+    imageUrl: 'https://example.com/images/fresh-spinach.jpg',
     vendorType: 'Vegetable Farm',
     unitsSold: 523,
     revenue: 20920,
@@ -537,6 +545,7 @@ export const getTopProductsBySales = (products: Product[], limit: number = 4) =>
     .sort((a, b) => (b.unitsSold || 0) - (a.unitsSold || 0))
     .slice(0, limit)
     .map(p => ({
+      id: p.id,
       name: p.name || 'Unknown',
       sold: p.unitsSold || 0,
       stock: p.stock || 0,

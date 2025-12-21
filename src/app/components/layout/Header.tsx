@@ -116,7 +116,7 @@ export function Header() {
                     variant="outline"
                     className="w-full h-14 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5 rounded-[44px] text-lg font-semibold"
                   >
-                    Dashboard
+                    Login / Signup
                   </Button>
                 </Link>
                 <Link to="/get-started" onClick={() => setIsOpen(false)} className="block">

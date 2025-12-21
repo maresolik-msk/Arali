@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -12,6 +13,7 @@ import { productsApi, notificationsApi, vendorsApi } from '../services/api';
 import type { Product, Vendor } from '../data/dashboardData';
 
 export function Inventory() {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [inventoryItems, setInventoryItems] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -684,7 +686,12 @@ export function Inventory() {
                         <div className="w-10 h-10 rounded-xl bg-[#0F4C81]/10 flex items-center justify-center">
                           <Package className="w-5 h-5 text-[#0F4C81]" />
                         </div>
-                        <span className="text-foreground">{item.name}</span>
+                        <button
+                          onClick={() => navigate(`/dashboard/inventory/${item.id}`)}
+                          className="text-foreground hover:text-[#0F4C81] hover:underline transition-colors text-left"
+                        >
+                          {item.name}
+                        </button>
                       </div>
                     </td>
                     <td className="py-4 px-6 text-muted-foreground">{item.sku}</td>
@@ -756,7 +763,7 @@ export function Inventory() {
               Add New Product
             </DialogTitle>
           </DialogHeader>
-          <div className="grid gap-6 py-4">
+          <div className="grid gap-6 py-4 max-h-[60vh] overflow-y-auto pr-2">
             <div className="space-y-2">
               <Label htmlFor="name" className="text-[#0F4C81]">Product Name</Label>
               <Input 

@@ -72,7 +72,10 @@ export function Login() {
       
       // Provide helpful error messages
       if (errorMessage.includes('Invalid login credentials')) {
-        toast.error('Invalid email or password. Please check your credentials or create a new account.');
+        toast.error('Invalid email or password. Please create an account if you\'re a new user.', {
+          duration: 5000,
+          description: 'Tip: Click "Create Account" below to sign up'
+        });
       } else if (errorMessage.includes('already exists')) {
         toast.error('An account with this email already exists. Please sign in instead.');
         setIsSignUp(false);
@@ -96,19 +99,25 @@ export function Login() {
     setIsLoading(true);
 
     try {
-      console.log('Attempting to reset password:', resetEmail);
       await resetPassword(resetEmail);
       toast.success('Password reset email sent. Please check your inbox.');
       setIsForgotPasswordOpen(false);
+      setResetEmail('');
     } catch (error: any) {
-      console.error('Password reset error:', error);
+      // Error logging is handled in auth service, no need to log again
       const errorMessage = error.message || 'Password reset failed';
       
       // Provide helpful error messages
-      if (errorMessage.includes('User not found')) {
+      if (errorMessage.includes('not found') || errorMessage.includes('User not found')) {
         toast.error('No account found with this email. Please check your email or create a new account.');
+      } else if (errorMessage.includes('Email service not configured') || errorMessage.includes('SMTP')) {
+        toast.error('Password reset is temporarily unavailable. Please contact support or try signing in with your existing password.', {
+          duration: 6000,
+        });
       } else {
-        toast.error(errorMessage);
+        toast.error(errorMessage, {
+          duration: 5000,
+        });
       }
     } finally {
       setIsLoading(false);
@@ -310,6 +319,18 @@ export function Login() {
               Forgot Password
             </DialogTitle>
           </DialogHeader>
+          
+          {/* Info Banner */}
+          <div className="bg-[#0F4C81]/5 border border-[#0F4C81]/20 rounded-lg p-4 flex gap-3">
+            <Info className="w-5 h-5 text-[#0F4C81] flex-shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="text-[#0F4C81] font-medium mb-1">Email Configuration Required</p>
+              <p className="text-muted-foreground text-xs">
+                Password reset requires SMTP email configuration. If you encounter issues, please contact support or continue with your existing password.
+              </p>
+            </div>
+          </div>
+
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="reset-email" className="text-[#0F4C81]">Email</Label>
@@ -334,7 +355,10 @@ export function Login() {
                 type="button"
                 variant="outline"
                 className="flex-1 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
-                onClick={() => setIsForgotPasswordOpen(false)}
+                onClick={() => {
+                  setIsForgotPasswordOpen(false);
+                  setResetEmail('');
+                }}
               >
                 Cancel
               </Button>

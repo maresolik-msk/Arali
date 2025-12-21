@@ -19,6 +19,41 @@ export interface AuthState {
   isAuthenticated: boolean;
 }
 
+// Helper function to decode JWT and check if it's expired
+function isTokenExpired(token: string): boolean {
+  try {
+    // JWT format: header.payload.signature
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.error('Invalid JWT format');
+      return true; // Treat invalid tokens as expired
+    }
+    
+    // Decode the payload (base64url)
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    
+    // Check expiry (exp is in seconds, Date.now() is in milliseconds)
+    const expiryTime = payload.exp * 1000;
+    const now = Date.now();
+    const bufferMs = 5 * 60 * 1000; // 5 minute buffer
+    
+    const isExpired = expiryTime <= now + bufferMs;
+    
+    if (isExpired) {
+      const minutesAgo = Math.round((now - expiryTime) / 1000 / 60);
+      console.warn(`[Auth] Token expired ${minutesAgo} minutes ago`);
+    } else {
+      const minutesLeft = Math.round((expiryTime - now) / 1000 / 60);
+      console.log(`[Auth] Token valid for ${minutesLeft} more minutes`);
+    }
+    
+    return isExpired;
+  } catch (error) {
+    console.error('Error decoding JWT:', error);
+    return true; // Treat decode errors as expired
+  }
+}
+
 // Sign up new user
 export async function signUp(email: string, password: string, name: string): Promise<User> {
   const response = await fetch(`${API_BASE_URL}/auth/signup`, {
@@ -93,56 +128,136 @@ export async function signOut(): Promise<void> {
 
 // Get current session
 export async function getCurrentSession(): Promise<AuthState> {
-  const { data, error } = await supabase.auth.getSession();
+  try {
+    // First try to refresh the session to ensure we have a valid token
+    console.log('[Auth] Getting current session - attempting refresh first...');
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
 
-  if (error || !data.session) {
-    // Try to get from localStorage as fallback
-    const token = localStorage.getItem('auth_token');
-    const userStr = localStorage.getItem('user');
-    
-    if (token && userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        return {
-          user,
-          accessToken: token,
-          isAuthenticated: true,
-        };
-      } catch {
+    // If refresh works, validate and use the refreshed session
+    if (!refreshError && refreshData.session && refreshData.session.access_token) {
+      // Validate the token before using it
+      if (isTokenExpired(refreshData.session.access_token)) {
+        console.error('[Auth] Refreshed token is STILL expired - refresh token must be invalid');
+        console.error('[Auth] This means both access and refresh tokens are expired - forcing sign out');
+        
+        // Force a complete sign out to clear all Supabase state
+        await supabase.auth.signOut();
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user');
+        sessionStorage.removeItem('access_token');
+        
         return {
           user: null,
           accessToken: null,
           isAuthenticated: false,
         };
       }
+      
+      console.log('[Auth] Session refreshed successfully with valid token');
+      
+      const user: User = {
+        id: refreshData.session.user.id,
+        email: refreshData.session.user.email!,
+        name: refreshData.session.user.user_metadata.name || refreshData.session.user.email!.split('@')[0],
+      };
+
+      // Update localStorage with fresh token
+      localStorage.setItem('auth_token', refreshData.session.access_token);
+      localStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.setItem('access_token', refreshData.session.access_token);
+
+      return {
+        user,
+        accessToken: refreshData.session.access_token,
+        isAuthenticated: true,
+      };
     }
 
+    // If refresh failed, try to get existing session (but don't use if expired)
+    console.log('[Auth] Refresh failed, trying to get existing session...');
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+      console.error('[Auth] Session retrieval error:', error);
+      // Force sign out and clear invalid session data
+      await supabase.auth.signOut();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      sessionStorage.removeItem('access_token');
+      
+      return {
+        user: null,
+        accessToken: null,
+        isAuthenticated: false,
+      };
+    }
+
+    if (!data.session || !data.session.access_token) {
+      // No active session - clear stored data
+      console.log('[Auth] No active session found');
+      await supabase.auth.signOut();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      sessionStorage.removeItem('access_token');
+      
+      return {
+        user: null,
+        accessToken: null,
+        isAuthenticated: false,
+      };
+    }
+
+    // Validate the existing token - DON'T use it if it's expired
+    if (isTokenExpired(data.session.access_token)) {
+      console.error('[Auth] Existing session token is also expired - forcing sign out');
+      await supabase.auth.signOut();
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      sessionStorage.removeItem('access_token');
+      
+      return {
+        user: null,
+        accessToken: null,
+        isAuthenticated: false,
+      };
+    }
+
+    // Valid session with non-expired token
+    console.log('[Auth] Using existing session with valid token');
+    const user: User = {
+      id: data.session.user.id,
+      email: data.session.user.email!,
+      name: data.session.user.user_metadata.name || data.session.user.email!.split('@')[0],
+    };
+
+    // Update localStorage with token
+    localStorage.setItem('auth_token', data.session.access_token);
+    localStorage.setItem('user', JSON.stringify(user));
+    sessionStorage.setItem('access_token', data.session.access_token);
+
+    return {
+      user,
+      accessToken: data.session.access_token,
+      isAuthenticated: true,
+    };
+  } catch (error) {
+    console.error('[Auth] Error in getCurrentSession:', error);
+    // Clear all auth data on any error
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
+    sessionStorage.removeItem('access_token');
+    
     return {
       user: null,
       accessToken: null,
       isAuthenticated: false,
     };
   }
-
-  const user: User = {
-    id: data.session.user.id,
-    email: data.session.user.email!,
-    name: data.session.user.user_metadata.name || data.session.user.email!.split('@')[0],
-  };
-
-  // Update localStorage
-  localStorage.setItem('auth_token', data.session.access_token);
-  localStorage.setItem('user', JSON.stringify(user));
-  sessionStorage.setItem('access_token', data.session.access_token);
-
-  return {
-    user,
-    accessToken: data.session.access_token,
-    isAuthenticated: true,
-  };
 }
 
 // Get access token for API requests
+// NOTE: This returns cached token from localStorage which may be expired.
+// For fresh tokens, use getCurrentSession() or supabase.auth.getSession()
 export function getAccessToken(): string | null {
   return localStorage.getItem('auth_token');
 }
@@ -154,8 +269,28 @@ export async function sendPasswordResetEmail(email: string): Promise<void> {
   });
 
   if (error) {
-    console.error('Password reset error:', error);
-    throw new Error(error.message || 'Failed to send password reset email');
+    // Don't log SMTP configuration errors as they're expected when SMTP is not set up
+    const errorMessage = error.message || '';
+    const isSMTPError = errorMessage.includes('sending') || 
+                        errorMessage.includes('recovery email') || 
+                        errorMessage.includes('SMTP') ||
+                        errorMessage.includes('mail');
+    
+    if (!isSMTPError) {
+      console.error('Password reset error:', error);
+    }
+    
+    // Check if it's an SMTP configuration error
+    if (isSMTPError) {
+      throw new Error('Email service not configured. Please contact support or use your existing password to sign in.');
+    }
+    
+    // Check if user doesn't exist
+    if (errorMessage.includes('not found') || errorMessage.includes('User not found')) {
+      throw new Error('No account found with this email address.');
+    }
+    
+    throw new Error(errorMessage || 'Failed to send password reset email');
   }
 }
 

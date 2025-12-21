@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { getCurrentSession, signIn as authSignIn, signUp as authSignUp, signOut as authSignOut, sendPasswordResetEmail, updatePassword, type User, type AuthState } from '../services/auth';
+import { createClient } from '@supabase/supabase-js';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { toast } from 'sonner';
+import { clearTokenCache } from '../services/api';
+
+const supabaseUrl = `https://${projectId}.supabase.co`;
+const supabase = createClient(supabaseUrl, publicAnonKey);
 
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;
@@ -29,12 +35,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(session.isAuthenticated);
       } catch (error) {
         console.error('Error checking session:', error);
+        // Clear auth state on error
+        setUser(null);
+        setAccessToken(null);
+        setIsAuthenticated(false);
       } finally {
         setIsLoading(false);
       }
     };
 
     checkSession();
+
+    // Set up auth state change listener for automatic token refresh
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event);
+      
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        // Clear auth state
+        setUser(null);
+        setAccessToken(null);
+        setIsAuthenticated(false);
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user');
+        sessionStorage.removeItem('access_token');
+        clearTokenCache();
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // Update auth state with new/refreshed token
+        if (session) {
+          const user: User = {
+            id: session.user.id,
+            email: session.user.email!,
+            name: session.user.user_metadata.name || session.user.email!.split('@')[0],
+          };
+          
+          setUser(user);
+          setAccessToken(session.access_token);
+          setIsAuthenticated(true);
+          
+          // Update storage
+          localStorage.setItem('auth_token', session.access_token);
+          localStorage.setItem('user', JSON.stringify(user));
+          sessionStorage.setItem('access_token', session.access_token);
+        }
+      } else if (event === 'USER_UPDATED') {
+        // Update user info
+        if (session) {
+          const user: User = {
+            id: session.user.id,
+            email: session.user.email!,
+            name: session.user.user_metadata.name || session.user.email!.split('@')[0],
+          };
+          setUser(user);
+          localStorage.setItem('user', JSON.stringify(user));
+        }
+      }
+    });
+
+    // Cleanup listener on unmount
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
@@ -72,6 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(null);
       setIsAuthenticated(false);
       toast.success('Signed out successfully');
+      // Redirect to landing page after successful logout
+      window.location.href = '/';
     } catch (error) {
       console.error('Sign out error:', error);
       toast.error('Failed to sign out');
@@ -82,7 +144,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await sendPasswordResetEmail(email);
     } catch (error) {
-      console.error('Reset password error:', error);
+      // Don't log SMTP configuration errors as they're expected
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (!errorMessage.includes('Email service not configured') && !errorMessage.includes('sending recovery email')) {
+        console.error('Reset password error:', error);
+      }
       throw error;
     }
   };
@@ -118,7 +184,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    // During hot module reload, context might be temporarily unavailable
+    // Return a safe default that shows loading state instead of crashing
+    console.warn('useAuth called outside AuthProvider - returning loading state');
+    return {
+      user: null,
+      accessToken: null,
+      isAuthenticated: false,
+      isLoading: true, // This will cause components to show loading spinner
+      signIn: async () => { throw new Error('Auth not initialized'); },
+      signUp: async () => { throw new Error('Auth not initialized'); },
+      signOut: async () => { throw new Error('Auth not initialized'); },
+      resetPassword: async () => { throw new Error('Auth not initialized'); },
+      changePassword: async () => { throw new Error('Auth not initialized'); },
+    };
   }
   return context;
 }
+
+// Export AuthContext for debugging if needed
+export { AuthContext };
