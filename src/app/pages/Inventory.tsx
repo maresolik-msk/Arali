@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
-import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2 } from 'lucide-react';
+import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { toast } from 'sonner';
 import { productsApi, notificationsApi, vendorsApi } from '../services/api';
+import { generateProductImage } from '../services/ai';
+import imgMilk from "figma:asset/18cf32dc4edc4f7ccc61c9bea27f743107dbf224.png";
 import type { Product, Vendor } from '../data/dashboardData';
 
 export function Inventory() {
@@ -22,6 +24,7 @@ export function Inventory() {
   const [isRestockDialogOpen, setIsRestockDialogOpen] = useState(false);
   const [isRecordSalesDialogOpen, setIsRecordSalesDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [productToDelete, setProductToDelete] = useState<{ id: number; name: string } | null>(null);
   const [lowStockNotified, setLowStockNotified] = useState<Set<number>>(new Set());
   const [newProduct, setNewProduct] = useState({
@@ -35,6 +38,7 @@ export function Inventory() {
     expiryDate: '',
     alertEnabled: true,
     threshold: '10',
+    imageUrl: '',
   });
   const [editingProduct, setEditingProduct] = useState<{
     id: number;
@@ -48,6 +52,7 @@ export function Inventory() {
     expiryDate: string;
     alertEnabled: boolean;
     threshold: string;
+    imageUrl: string;
   } | null>(null);
   const [restockingProduct, setRestockingProduct] = useState<{
     id: number;
@@ -66,41 +71,63 @@ export function Inventory() {
 
   // Load products from backend on mount
   useEffect(() => {
+    let isMounted = true; // Cleanup flag to prevent state updates after unmount
+    
     const loadProducts = async () => {
       try {
         setIsLoading(true);
         const products = await productsApi.getAll();
-        setInventoryItems(products || []);
+        if (isMounted) {
+          setInventoryItems(products || []);
+        }
       } catch (error) {
         console.error('Error loading products:', error);
-        toast.error('Failed to load products');
-        setInventoryItems([]);
+        if (isMounted) {
+          toast.error('Failed to load products');
+          setInventoryItems([]);
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     loadProducts();
+
+    return () => {
+      isMounted = false; // Cleanup on unmount
+    };
   }, []);
 
   // Load vendors from backend on mount
   useEffect(() => {
+    let isMounted = true; // Cleanup flag to prevent state updates after unmount
+    
     const loadVendors = async () => {
       try {
         const vendorList = await vendorsApi.getAll();
-        setVendors(vendorList || []);
+        if (isMounted) {
+          setVendors(vendorList || []);
+        }
       } catch (error) {
         console.error('Error loading vendors:', error);
-        toast.error('Failed to load vendors');
-        setVendors([]);
+        if (isMounted) {
+          toast.error('Failed to load vendors');
+          setVendors([]);
+        }
       }
     };
 
     loadVendors();
+
+    return () => {
+      isMounted = false; // Cleanup on unmount
+    };
   }, []);
 
-  // Helper function to sync vendor when product is added/updated
-  const syncVendor = async (vendorName: string, productCostPrice: number, isNew: boolean = true) => {
+  // Helper function to sync vendor when product is added/updated - MEMOIZED
+  const syncVendor = useCallback(async (vendorName: string, productCostPrice: number, isNew: boolean = true) => {
     if (!vendorName) return;
 
     try {
@@ -162,11 +189,13 @@ export function Inventory() {
       console.error('Error syncing vendor:', error);
       // Don't show error toast as this is a background operation
     }
-  };
+  }, [vendors]); // Add vendors dependency for useCallback
 
-  // Check for low stock and show notifications
+  // Check for low stock and show notifications - OPTIMIZED with cleanup
   useEffect(() => {
     if (inventoryItems.length === 0 || isLoading) return;
+    
+    let isMounted = true; // Cleanup flag
     
     // Find products with alerts enabled that are at or below threshold
     const lowStockProducts = inventoryItems.filter(
@@ -178,7 +207,7 @@ export function Inventory() {
     );
     
     // Show notifications for low stock products
-    if (lowStockProducts.length > 0) {
+    if (lowStockProducts.length > 0 && isMounted) {
       const productNames = lowStockProducts.map(p => p.name).join(', ');
       toast.warning(`Low Stock Alert: ${lowStockProducts.length} product${lowStockProducts.length > 1 ? 's' : ''} running low`, {
         description: productNames,
@@ -186,31 +215,34 @@ export function Inventory() {
       });
 
       // Create app notifications for low stock products (only if not already notified)
-      lowStockProducts.forEach(async (product) => {
+      lowStockProducts.forEach((product) => {
         if (!lowStockNotified.has(product.id)) {
-          try {
-            await notificationsApi.create({
-              userId: '', // Will be set by backend
-              type: 'low_stock',
-              title: 'Low Stock Alert',
-              message: `${product.name} is running low. Only ${product.stock} units remaining (threshold: ${product.threshold}).`,
-              read: false,
-              relatedTo: {
-                type: 'product',
-                id: product.id,
-                name: product.name,
-              },
-            });
-            setLowStockNotified(prev => new Set([...prev, product.id]));
-          } catch (error) {
+          notificationsApi.create({
+            userId: '', // Will be set by backend
+            type: 'low_stock',
+            title: 'Low Stock Alert',
+            message: `${product.name} is running low. Only ${product.stock} units remaining (threshold: ${product.threshold}).`,
+            read: false,
+            relatedTo: {
+              type: 'product',
+              id: product.id,
+              name: product.name,
+            },
+          })
+          .then(() => {
+            if (isMounted) {
+              setLowStockNotified(prev => new Set([...prev, product.id]));
+            }
+          })
+          .catch(error => {
             console.error('Failed to create notification:', error);
-          }
+          });
         }
       });
     }
     
     // Show notifications for out of stock products
-    if (outOfStockProducts.length > 0) {
+    if (outOfStockProducts.length > 0 && isMounted) {
       const productNames = outOfStockProducts.map(p => p.name).join(', ');
       toast.error(`Out of Stock: ${outOfStockProducts.length} product${outOfStockProducts.length > 1 ? 's' : ''}`, {
         description: productNames,
@@ -218,38 +250,45 @@ export function Inventory() {
       });
 
       // Create app notifications for out of stock products (only if not already notified)
-      outOfStockProducts.forEach(async (product) => {
+      outOfStockProducts.forEach((product) => {
         if (!lowStockNotified.has(product.id)) {
-          try {
-            await notificationsApi.create({
-              userId: '', // Will be set by backend
-              type: 'out_of_stock',
-              title: 'Out of Stock',
-              message: `${product.name} is out of stock. Please restock immediately.`,
-              read: false,
-              relatedTo: {
-                type: 'product',
-                id: product.id,
-                name: product.name,
-              },
-            });
-            setLowStockNotified(prev => new Set([...prev, product.id]));
-          } catch (error) {
+          notificationsApi.create({
+            userId: '', // Will be set by backend
+            type: 'out_of_stock',
+            title: 'Out of Stock',
+            message: `${product.name} is out of stock. Please restock immediately.`,
+            read: false,
+            relatedTo: {
+              type: 'product',
+              id: product.id,
+              name: product.name,
+            },
+          })
+          .then(() => {
+            if (isMounted) {
+              setLowStockNotified(prev => new Set([...prev, product.id]));
+            }
+          })
+          .catch(error => {
             console.error('Failed to create notification:', error);
-          }
+          });
         }
       });
     }
-  }, [inventoryItems, isLoading, lowStockNotified]);
 
-  // Get unique categories from existing products
-  const uniqueCategories = React.useMemo(() => {
+    return () => {
+      isMounted = false; // Cleanup on unmount to prevent state updates
+    };
+  }, [inventoryItems, isLoading]); // Removed lowStockNotified to prevent infinite loop
+
+  // Get unique categories from existing products - OPTIMIZED with useMemo
+  const uniqueCategories = useMemo(() => {
     const categories = inventoryItems.map(item => item.category);
     return Array.from(new Set(categories)).filter(Boolean).sort();
   }, [inventoryItems]);
 
-  // Get unique vendor names from vendors list
-  const vendorNames = React.useMemo(() => {
+  // Get unique vendor names from vendors list - OPTIMIZED with useMemo
+  const vendorNames = useMemo(() => {
     return vendors.map(v => v.company).filter(Boolean).sort();
   }, [vendors]);
 
@@ -274,6 +313,48 @@ export function Inventory() {
         return 'bg-red-100 text-red-700';
       default:
         return 'bg-gray-100 text-gray-700';
+    }
+  };
+
+  const handleGenerateImage = async (isEditing: boolean) => {
+    const product = isEditing ? editingProduct : newProduct;
+    if (!product?.name) {
+      toast.error('Please enter a product name first');
+      return;
+    }
+
+    try {
+      setIsGeneratingImage(true);
+      
+      let imageUrl: string;
+      let isFallback = false;
+
+      // Special case for "milk" to use the specific provided asset
+      if (product.name.trim().toLowerCase() === 'milk') {
+        imageUrl = imgMilk;
+        isFallback = false; // It's a specific asset, not a generic fallback
+      } else {
+        const result = await generateProductImage(product.name, undefined, product.category);
+        imageUrl = result.imageUrl;
+        isFallback = result.isFallback;
+      }
+      
+      if (isEditing && editingProduct) {
+        setEditingProduct({ ...editingProduct, imageUrl });
+      } else {
+        setNewProduct({ ...newProduct, imageUrl });
+      }
+      
+      if (isFallback) {
+        toast.warning('Using placeholder image due to AI service limits.');
+      } else {
+        toast.success('Product image generated successfully!');
+      }
+    } catch (error) {
+      console.error('Error generating image:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to generate image');
+    } finally {
+      setIsGeneratingImage(false);
     }
   };
 
@@ -332,6 +413,7 @@ export function Inventory() {
         unitsSold: 0, // Initialize with 0
         revenue: 0, // Initialize with 0
         expiryDate: newProduct.expiryDate || undefined, // Optional expiry date
+        imageUrl: newProduct.imageUrl || undefined,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -354,6 +436,7 @@ export function Inventory() {
         expiryDate: '',
         alertEnabled: true,
         threshold: '10',
+        imageUrl: '',
       });
 
       // Close dialog
@@ -383,6 +466,7 @@ export function Inventory() {
       expiryDate: item.expiryDate || '',
       alertEnabled: item.alertEnabled || true,
       threshold: item.threshold.toString() || '10',
+      imageUrl: item.imageUrl || '',
     });
     setIsEditDialogOpen(true);
   };
@@ -442,6 +526,7 @@ export function Inventory() {
         alertEnabled: editingProduct.alertEnabled, // Store alert enabled flag
         threshold: thresholdNum, // Store alert threshold
         status: status,
+        imageUrl: editingProduct.imageUrl || undefined,
       });
 
       // Update local state
@@ -461,6 +546,7 @@ export function Inventory() {
               alertEnabled: editingProduct.alertEnabled, // Update alert enabled flag
               threshold: thresholdNum, // Update alert threshold
               status: status,
+              imageUrl: editingProduct.imageUrl || undefined,
             }
           : item
       ));
@@ -683,8 +769,12 @@ export function Inventory() {
                   >
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#0F4C81]/10 flex items-center justify-center">
-                          <Package className="w-5 h-5 text-[#0F4C81]" />
+                        <div className="w-10 h-10 rounded-xl bg-[#0F4C81]/10 flex items-center justify-center overflow-hidden">
+                          {item.imageUrl ? (
+                            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <Package className="w-5 h-5 text-[#0F4C81]" />
+                          )}
                         </div>
                         <button
                           onClick={() => navigate(`/dashboard/inventory/${item.id}`)}
@@ -756,14 +846,58 @@ export function Inventory() {
 
       {/* Add Product Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="add-product-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Package className="w-5 h-5" />
               Add New Product
             </DialogTitle>
+            <DialogDescription id="add-product-description">
+              Enter product details below to add a new item to your inventory.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-6 py-4 max-h-[60vh] overflow-y-auto pr-2">
+          <div className="grid gap-6 py-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+            {/* Image Upload/Generation Section */}
+            <div className="flex flex-col gap-3">
+              <Label className="text-[#0F4C81]">Product Image</Label>
+              <div className="flex gap-4 items-start">
+                <div className="w-24 h-24 rounded-lg bg-[#0F4C81]/5 border border-[#0F4C81]/10 flex items-center justify-center overflow-hidden">
+                  {newProduct.imageUrl ? (
+                    <img src={newProduct.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <ImageIcon className="w-8 h-8 text-[#0F4C81]/40" />
+                  )}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <Input 
+                    placeholder="Image URL"
+                    value={newProduct.imageUrl}
+                    onChange={(e) => setNewProduct({ ...newProduct, imageUrl: e.target.value })}
+                    className="h-9 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81]"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => handleGenerateImage(false)}
+                    disabled={isGeneratingImage || !newProduct.name}
+                    className="w-full border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
+                  >
+                    {isGeneratingImage ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3 h-3 mr-2" />
+                        Generate with AI
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="name" className="text-[#0F4C81]">Product Name</Label>
               <Input 
@@ -799,11 +933,6 @@ export function Inventory() {
                   <option key={cat} value={cat} />
                 ))}
               </datalist>
-              {uniqueCategories.length > 0 && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  Existing categories: {uniqueCategories.join(', ')}
-                </p>
-              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="expiryDate" className="text-[#0F4C81]">Expiry Date (Optional)</Label>
@@ -864,16 +993,6 @@ export function Inventory() {
                     <option key={vendor} value={vendor} />
                   ))}
                 </datalist>
-                {vendorNames.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Select from existing vendors: {vendorNames.slice(0, 3).join(', ')}{vendorNames.length > 3 ? `, +${vendorNames.length - 3} more` : ''}
-                  </p>
-                )}
-                {vendorNames.length === 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    No vendors yet. Type a name to create a new vendor automatically.
-                  </p>
-                )}
               </div>
             </div>
             
@@ -931,14 +1050,58 @@ export function Inventory() {
 
       {/* Edit Product Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] max-h-[90vh] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl overflow-y-auto" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl overflow-y-auto custom-scrollbar" aria-describedby="edit-product-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Package className="w-5 h-5" />
               Edit Product
             </DialogTitle>
+            <DialogDescription id="edit-product-description">
+              Modify the product details below. Click update to save changes.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-6 py-4">
+             {/* Image Upload/Generation Section */}
+             <div className="flex flex-col gap-3">
+              <Label className="text-[#0F4C81]">Product Image</Label>
+              <div className="flex gap-4 items-start">
+                <div className="w-24 h-24 rounded-lg bg-[#0F4C81]/5 border border-[#0F4C81]/10 flex items-center justify-center overflow-hidden">
+                  {editingProduct?.imageUrl ? (
+                    <img src={editingProduct.imageUrl} alt="Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <ImageIcon className="w-8 h-8 text-[#0F4C81]/40" />
+                  )}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <Input 
+                    placeholder="Image URL"
+                    value={editingProduct?.imageUrl || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct!, imageUrl: e.target.value })}
+                    className="h-9 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81]"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => handleGenerateImage(true)}
+                    disabled={isGeneratingImage || !editingProduct?.name}
+                    className="w-full border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
+                  >
+                    {isGeneratingImage ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3 h-3 mr-2" />
+                        Generate with AI
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="name" className="text-[#0F4C81]">Product Name</Label>
               <Input 
@@ -974,11 +1137,6 @@ export function Inventory() {
                   <option key={cat} value={cat} />
                 ))}
               </datalist>
-              {uniqueCategories.length > 0 && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  Existing categories: {uniqueCategories.join(', ')}
-                </p>
-              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="editExpiryDate" className="text-[#0F4C81]">Expiry Date (Optional)</Label>
@@ -1039,11 +1197,6 @@ export function Inventory() {
                     <option key={vendor} value={vendor} />
                   ))}
                 </datalist>
-                {vendorNames.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Select from existing vendors: {vendorNames.slice(0, 3).join(', ')}{vendorNames.length > 3 ? `, +${vendorNames.length - 3} more` : ''}
-                  </p>
-                )}
               </div>
             </div>
             
@@ -1101,12 +1254,15 @@ export function Inventory() {
 
       {/* Restock Product Dialog */}
       <Dialog open={isRestockDialogOpen} onOpenChange={setIsRestockDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="restock-product-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <PackagePlus className="w-5 h-5" />
               Restock Product
             </DialogTitle>
+            <DialogDescription id="restock-product-description">
+              Add stock to your inventory. This will increase the current stock level.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-6 py-4">
             <div className="space-y-2">
@@ -1162,12 +1318,15 @@ export function Inventory() {
 
       {/* Record Sales Dialog */}
       <Dialog open={isRecordSalesDialogOpen} onOpenChange={setIsRecordSalesDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="record-sales-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <ShoppingCart className="w-5 h-5" />
               Record Sales
             </DialogTitle>
+            <DialogDescription id="record-sales-description">
+              Record a sale for this product to update stock and revenue.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-6 py-4">
             <div className="space-y-2">
@@ -1233,12 +1392,15 @@ export function Inventory() {
 
       {/* Delete Product Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="delete-product-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Trash2 className="w-5 h-5" />
               Delete Product
             </DialogTitle>
+            <DialogDescription id="delete-product-description">
+              Are you sure you want to delete this product? This action cannot be undone.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-6 py-4">
             <div className="space-y-2">

@@ -6,7 +6,7 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -312,12 +312,15 @@ export function Login() {
 
       {/* Forgot Password Dialog */}
       <Dialog open={isForgotPasswordOpen} onOpenChange={setIsForgotPasswordOpen}>
-        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="forgot-password-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <KeyRound className="w-5 h-5" />
               Forgot Password
             </DialogTitle>
+            <DialogDescription id="forgot-password-description">
+              Enter your email address to receive a password reset link.
+            </DialogDescription>
           </DialogHeader>
           
           {/* Info Banner */}
@@ -386,12 +389,15 @@ export function Login() {
 
       {/* Reset Password Dialog */}
       <Dialog open={isResetPasswordOpen} onOpenChange={setIsResetPasswordOpen}>
-        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="reset-password-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Lock className="w-5 h-5" />
               Reset Password
             </DialogTitle>
+            <DialogDescription id="reset-password-description">
+              Enter your new password below.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleResetPassword} className="space-y-4">
             <div className="space-y-2">

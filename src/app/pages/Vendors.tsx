@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Truck, Plus, Search, Edit2, Star, Phone, Mail, MapPin, Building2, Trash2 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { toast } from 'sonner';
@@ -437,12 +437,15 @@ export function Vendors() {
 
       {/* Add Vendor Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="add-vendor-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Truck className="w-5 h-5" />
               Add New Vendor
             </DialogTitle>
+            <DialogDescription id="add-vendor-description">
+              Enter vendor details to add a new supplier to your list.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-6 py-4">
             <div className="grid grid-cols-2 gap-4">
@@ -597,12 +600,15 @@ export function Vendors() {
 
       {/* Edit Vendor Dialog - Similar structure to Add Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="edit-vendor-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Truck className="w-5 h-5" />
               Edit Vendor
             </DialogTitle>
+            <DialogDescription id="edit-vendor-description">
+              Update the details for this vendor.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-6 py-4">
             <div className="grid grid-cols-2 gap-4">
@@ -769,12 +775,15 @@ export function Vendors() {
 
       {/* Delete Vendor Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+        <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="delete-vendor-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Trash2 className="w-5 h-5" />
               Delete Vendor
             </DialogTitle>
+            <DialogDescription id="delete-vendor-description">
+              Confirm vendor deletion. This action cannot be undone.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-6 py-4">
             <p className="text-sm text-muted-foreground">Are you sure you want to delete the vendor <strong className="text-foreground">{vendorToDelete?.name}</strong>?</p>

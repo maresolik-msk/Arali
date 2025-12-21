@@ -1,11 +1,7 @@
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
 
 const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-29b58f9a`;
-
-// Create Supabase client for token management
-const supabaseUrl = `https://${projectId}.supabase.co`;
-const supabase = createClient(supabaseUrl, publicAnonKey);
 
 // Get fresh access token from Supabase session
 async function getAccessToken(): Promise<string | null> {
@@ -30,7 +26,7 @@ async function getAccessToken(): Promise<string | null> {
 }
 
 // AI Product Image Generation
-export async function generateProductImage(productName: string, productDescription?: string, productCategory?: string): Promise<{ imageUrl: string; revisedPrompt: string }> {
+export async function generateProductImage(productName: string, productDescription?: string, productCategory?: string): Promise<{ imageUrl: string; revisedPrompt: string; isFallback?: boolean }> {
   try {
     const token = await getAccessToken();
     if (!token) {
@@ -78,7 +74,7 @@ export async function generateProductImage(productName: string, productDescripti
       const retryData = await retryResponse.json();
       
       if (!retryResponse.ok) {
-        throw new Error(retryData.error || 'Failed to generate product image');
+        throw new Error(retryData.details || retryData.error || 'Failed to generate product image');
       }
       
       return {
@@ -88,12 +84,15 @@ export async function generateProductImage(productName: string, productDescripti
     }
 
     if (!response.ok) {
-      throw new Error(data.error || 'Failed to generate product image');
+      // Check if it's a fallback response despite 200 OK (some APIs might do this) or if it's our mocked response structure
+      // Actually, my backend code returns 200 OK for fallback, so this block is for other errors.
+      throw new Error(data.details || data.error || 'Failed to generate product image');
     }
 
     return {
       imageUrl: data.imageUrl,
-      revisedPrompt: data.revisedPrompt
+      revisedPrompt: data.revisedPrompt,
+      isFallback: data.isFallback
     };
   } catch (error) {
     console.error('Error generating product image:', error);

@@ -1,5 +1,5 @@
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
 import type { Product, Customer, Order, RevenueSource, Notification, Vendor } from '../data/dashboardData';
 
 export interface ShopSettings {
@@ -10,10 +10,6 @@ export interface ShopSettings {
 }
 
 const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-29b58f9a`;
-
-// Create Supabase client for token management
-const supabaseUrl = `https://${projectId}.supabase.co`;
-const supabase = createClient(supabaseUrl, publicAnonKey);
 
 // Token cache to avoid refreshing on every call
 let cachedToken: string | null = null;

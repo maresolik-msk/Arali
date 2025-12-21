@@ -1290,7 +1290,20 @@ app.post("/make-server-29b58f9a/ai/generate-product-image", async (c) => {
 
     if (!response.ok) {
       const errorData = await response.json();
+      
+      // Handle billing hard limit by returning a fallback image
+      if (errorData.error?.code === 'billing_hard_limit_reached' || errorData.error?.type === 'insufficient_quota') {
+        console.warn('Billing hard limit reached. Using fallback placeholder image.');
+        return c.json({ 
+          imageUrl: 'https://placehold.co/1024x1024/0F4C81/FFFFFF/png?text=AI+Unavailable\n(Billing+Limit)',
+          revisedPrompt: "System: OpenAI billing limit reached. Using placeholder image.",
+          success: true,
+          isFallback: true
+        });
+      }
+
       console.error('DALL-E API error:', errorData);
+
       return c.json({ 
         error: 'Failed to generate image', 
         details: errorData.error?.message || 'Unknown error' 
@@ -1379,7 +1392,19 @@ Make it appealing to Indian retail customers.`
 
     if (!response.ok) {
       const errorData = await response.json();
+      
+      // Handle billing hard limit by returning fallback description
+      if (errorData.error?.code === 'billing_hard_limit_reached' || errorData.error?.type === 'insufficient_quota') {
+        console.warn('Billing hard limit reached. Using fallback description.');
+        return c.json({ 
+          enhancedDescription: `${productName} - ${productCategory || 'Product'}. (AI enhancement unavailable due to billing limits)`,
+          success: true,
+          isFallback: true
+        });
+      }
+
       console.error('GPT-4 API error:', errorData);
+
       return c.json({ 
         error: 'Failed to enhance description', 
         details: errorData.error?.message || 'Unknown error' 
@@ -1515,7 +1540,25 @@ Format as JSON with keys: insights, recommendations, predictions, inventoryOptim
 
     if (!response.ok) {
       const errorData = await response.json();
+      
+      // Handle billing hard limit by returning fallback analysis
+      if (errorData.error?.code === 'billing_hard_limit_reached' || errorData.error?.type === 'insufficient_quota') {
+        console.warn('Billing hard limit reached. Using fallback analysis.');
+        return c.json({ 
+          analysis: {
+            insights: ["AI Analysis unavailable due to billing limits.", "Please check your OpenAI account settings."],
+            recommendations: ["Manually review your top selling products.", "Check inventory levels for restocking."],
+            predictions: ["Unable to predict trends without AI service."],
+            inventoryOptimization: ["Monitor low stock items manually."]
+          },
+          analyticsData,
+          success: true,
+          isFallback: true
+        });
+      }
+
       console.error('OpenAI API error:', JSON.stringify(errorData, null, 2));
+
       return c.json({ 
         error: 'Failed to analyze patterns', 
         details: errorData.error?.message || 'Unknown OpenAI API error' 

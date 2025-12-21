@@ -5,7 +5,7 @@ import { ArrowLeft, Package, TrendingUp, AlertCircle, Calendar, DollarSign, Edit
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
@@ -75,13 +75,13 @@ export function ProductDetail() {
       name: product.name,
       sku: product.sku,
       category: product.category,
-      stock: product.stock.toString(),
-      costPrice: product.costPrice.toString(),
-      sellingPrice: product.sellingPrice.toString(),
+      stock: (product.stock ?? 0).toString(),
+      costPrice: (product.costPrice ?? 0).toString(),
+      sellingPrice: (product.sellingPrice ?? 0).toString(),
       vendorType: product.vendorType || '',
       expiryDate: product.expiryDate || '',
       alertEnabled: product.alertEnabled,
-      threshold: product.threshold.toString(),
+      threshold: (product.threshold ?? 0).toString(),
       description: product.description || '',
       imageUrl: product.imageUrl || '',
     });
@@ -219,7 +219,7 @@ export function ProductDetail() {
               <p className="text-white/60">SKU: {product.sku}</p>
             </div>
             <div className="flex gap-2">
-              <Button onClick={handleEdit} variant="outline" className="text-white border-white/20">
+              <Button onClick={handleEdit} variant="outline" className="text-white border-white/20 bg-[rgb(3,18,30)]">
                 <Edit2 className="w-4 h-4 mr-2" />
                 Edit
               </Button>
@@ -411,9 +411,12 @@ export function ProductDetail() {
 
       {/* Edit Product Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-[#0F4C81] border-white/20 text-white max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="edit-product-description">
           <DialogHeader>
             <DialogTitle className="text-white">Edit Product</DialogTitle>
+            <DialogDescription id="edit-product-description" className="text-white/60">
+              Make changes to the product details below.
+            </DialogDescription>
           </DialogHeader>
           {editingProduct && (
             <div className="space-y-4">
@@ -538,7 +541,7 @@ export function ProductDetail() {
                     className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
-                <div>
+                <div className="px-[0px] py-[2px] mx-[0px] my-[2px]">
                   <Label htmlFor="edit-expiry" className="text-white">Expiry Date</Label>
                   <Input
                     id="edit-expiry"
@@ -574,9 +577,12 @@ export function ProductDetail() {
 
       {/* Restock Dialog */}
       <Dialog open={isRestockDialogOpen} onOpenChange={setIsRestockDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white">
+        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="restock-product-description">
           <DialogHeader>
             <DialogTitle className="text-white">Restock Product</DialogTitle>
+            <DialogDescription id="restock-product-description" className="text-white/60">
+              Add inventory to the current stock count.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-white/80">Current Stock: {product.stock} units</p>
@@ -608,9 +614,12 @@ export function ProductDetail() {
 
       {/* Record Sale Dialog */}
       <Dialog open={isRecordSalesDialogOpen} onOpenChange={setIsRecordSalesDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white">
+        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="record-sale-description">
           <DialogHeader>
             <DialogTitle className="text-white">Record Sale</DialogTitle>
+            <DialogDescription id="record-sale-description" className="text-white/60">
+              Deduct items from stock and record a sale.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-white/80">Current Stock: {product.stock} units</p>
@@ -647,9 +656,12 @@ export function ProductDetail() {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white">
+        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="delete-product-description">
           <DialogHeader>
             <DialogTitle className="text-white">Delete Product</DialogTitle>
+            <DialogDescription id="delete-product-description" className="text-white/60">
+              Confirm deletion of this product. This action cannot be undone.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-white">Are you sure you want to delete <strong>{product.name}</strong>?</p>

@@ -17,22 +17,34 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let isMounted = true; // Cleanup flag
+    
     if (isOpen) {
       loadNotifications();
     }
+    
+    return () => {
+      isMounted = false; // Cleanup on unmount
+    };
+    
+    async function loadNotifications() {
+      try {
+        setLoading(true);
+        const data = await notificationsApi.getAll();
+        if (isMounted) {
+          setNotifications(data);
+        }
+      } catch (error) {
+        console.error('Failed to load notifications:', error);
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
   }, [isOpen]);
 
-  const loadNotifications = async () => {
-    try {
-      setLoading(true);
-      const data = await notificationsApi.getAll();
-      setNotifications(data);
-    } catch (error) {
-      console.error('Failed to load notifications:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   const handleMarkAsRead = async (id: string) => {
     try {

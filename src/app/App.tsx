@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router-dom';
 import { Layout } from './components/layout/Layout';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { Home } from './pages/Home';
@@ -22,7 +22,7 @@ import { ProductDetail } from './pages/ProductDetail';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from 'sonner';
 
-// Arali - Premium Retail Management App v2.2 - Fixed AuthProvider context
+// Arali - Premium Retail Management App v2.3 - Fixed Router and Supabase Client
 // Last updated: December 21, 2024
 
 // Protected Route Component
@@ -84,47 +84,51 @@ function LoginRoute() {
   }
 }
 
+// Define the router configuration
+const router = createBrowserRouter([
+  {
+    path: "/login",
+    element: <LoginRoute />
+  },
+  {
+    path: "/",
+    element: <Layout />,
+    children: [
+      { index: true, element: <Home /> },
+      { path: "how-it-works", element: <HowItWorks /> },
+      { path: "features", element: <Features /> },
+      { path: "why-arali", element: <WhyArali /> },
+      { path: "story", element: <Story /> },
+      { path: "faq", element: <FAQ /> },
+      { path: "get-started", element: <GetStarted /> },
+    ]
+  },
+  {
+    path: "/dashboard",
+    element: (
+      <ProtectedRoute>
+        <DashboardLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <Dashboard /> },
+      { path: "inventory", element: <Inventory /> },
+      { path: "inventory/:productId", element: <ProductDetail /> },
+      { path: "orders", element: <Orders /> },
+      { path: "customers", element: <Customers /> },
+      { path: "vendors", element: <Vendors /> },
+      { path: "analytics", element: <Analytics /> },
+      { path: "ai-insights", element: <AIInsights /> },
+      { path: "settings", element: <DashboardSettings /> },
+    ]
+  }
+]);
+
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* Login Route */}
-          <Route path="/login" element={<LoginRoute />} />
-          
-          {/* Public Routes */}
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Home />} />
-            <Route path="how-it-works" element={<HowItWorks />} />
-            <Route path="features" element={<Features />} />
-            <Route path="why-arali" element={<WhyArali />} />
-            <Route path="story" element={<Story />} />
-            <Route path="faq" element={<FAQ />} />
-            <Route path="get-started" element={<GetStarted />} />
-          </Route>
-
-          {/* Protected Dashboard Routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <DashboardLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="inventory" element={<Inventory />} />
-            <Route path="inventory/:productId" element={<ProductDetail />} />
-            <Route path="orders" element={<Orders />} />
-            <Route path="customers" element={<Customers />} />
-            <Route path="vendors" element={<Vendors />} />
-            <Route path="analytics" element={<Analytics />} />
-            <Route path="ai-insights" element={<AIInsights />} />
-            <Route path="settings" element={<DashboardSettings />} />
-          </Route>
-        </Routes>
-        <Toaster />
-      </BrowserRouter>
+      <RouterProvider router={router} />
+      <Toaster />
     </AuthProvider>
   );
 }

@@ -1,12 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { getCurrentSession, signIn as authSignIn, signUp as authSignUp, signOut as authSignOut, sendPasswordResetEmail, updatePassword, type User, type AuthState } from '../services/auth';
-import { createClient } from '@supabase/supabase-js';
-import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { supabase } from '../services/supabaseClient';
 import { toast } from 'sonner';
 import { clearTokenCache } from '../services/api';
-
-const supabaseUrl = `https://${projectId}.supabase.co`;
-const supabase = createClient(supabaseUrl, publicAnonKey);
 
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;

@@ -20,7 +20,8 @@ export function AIInsights() {
       toast.success('AI analysis completed successfully!');
     } catch (error) {
       console.error('Error analyzing patterns:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to analyze patterns');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to analyze patterns';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
