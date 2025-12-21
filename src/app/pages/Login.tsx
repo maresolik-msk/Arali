@@ -1,25 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { useNavigate } from 'react-router-dom';
-import { LogIn, UserPlus, Mail, Lock, User, Info } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { LogIn, UserPlus, Mail, Lock, User, Info, KeyRound } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
 export function Login() {
   const navigate = useNavigate();
-  const { signIn, signUp } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { signIn, signUp, resetPassword, changePassword } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
+  const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
   });
+
+  // Check if user is coming from password reset email
+  useEffect(() => {
+    const reset = searchParams.get('reset');
+    if (reset === 'true') {
+      setIsResetPasswordOpen(true);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +76,78 @@ export function Login() {
       } else if (errorMessage.includes('already exists')) {
         toast.error('An account with this email already exists. Please sign in instead.');
         setIsSignUp(false);
+      } else {
+        toast.error(errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validation
+    if (!resetEmail) {
+      toast.error('Please enter your email');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      console.log('Attempting to reset password:', resetEmail);
+      await resetPassword(resetEmail);
+      toast.success('Password reset email sent. Please check your inbox.');
+      setIsForgotPasswordOpen(false);
+    } catch (error: any) {
+      console.error('Password reset error:', error);
+      const errorMessage = error.message || 'Password reset failed';
+      
+      // Provide helpful error messages
+      if (errorMessage.includes('User not found')) {
+        toast.error('No account found with this email. Please check your email or create a new account.');
+      } else {
+        toast.error(errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validation
+    if (!newPassword || !confirmPassword) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      console.log('Attempting to change password');
+      await changePassword(newPassword);
+      toast.success('Password changed successfully. Please sign in.');
+      setIsResetPasswordOpen(false);
+    } catch (error: any) {
+      console.error('Password change error:', error);
+      const errorMessage = error.message || 'Password change failed';
+      
+      // Provide helpful error messages
+      if (errorMessage.includes('Invalid token')) {
+        toast.error('Password reset link is invalid or has expired. Please request a new password reset.');
       } else {
         toast.error(errorMessage);
       }
@@ -199,9 +286,153 @@ export function Login() {
                 )}
               </button>
             </div>
+
+            {/* Forgot Password Link */}
+            <div className="mt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setIsForgotPasswordOpen(true)}
+                className="text-[#0F4C81] hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
           </div>
         </Card>
       </motion.div>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={isForgotPasswordOpen} onOpenChange={setIsForgotPasswordOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
+              <KeyRound className="w-5 h-5" />
+              Forgot Password
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="reset-email" className="text-[#0F4C81]">Email</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
+                <Input
+                  id="reset-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                We'll send you a password reset link to your email
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
+                onClick={() => setIsForgotPasswordOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/30"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Sending...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Mail className="w-4 h-4" />
+                    Send Reset Link
+                  </span>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={isResetPasswordOpen} onOpenChange={setIsResetPasswordOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
+              <Lock className="w-5 h-5" />
+              Reset Password
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="newPassword" className="text-[#0F4C81]">New Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
+                <Input
+                  id="newPassword"
+                  type="password"
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                At least 6 characters
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword" className="text-[#0F4C81]">Confirm Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
+                onClick={() => setIsResetPasswordOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/30"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Updating...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <KeyRound className="w-4 h-4" />
+                    Update Password
+                  </span>
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getCurrentSession, signIn as authSignIn, signUp as authSignUp, signOut as authSignOut, type User, type AuthState } from '../services/auth';
+import { getCurrentSession, signIn as authSignIn, signUp as authSignUp, signOut as authSignOut, sendPasswordResetEmail, updatePassword, type User, type AuthState } from '../services/auth';
 import { toast } from 'sonner';
 
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<void>;
   signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  changePassword: (newPassword: string) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -76,6 +78,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const resetPassword = async (email: string) => {
+    try {
+      await sendPasswordResetEmail(email);
+    } catch (error) {
+      console.error('Reset password error:', error);
+      throw error;
+    }
+  };
+
+  const changePassword = async (newPassword: string) => {
+    try {
+      await updatePassword(newPassword);
+    } catch (error) {
+      console.error('Change password error:', error);
+      throw error;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -86,6 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signUp,
         signOut,
+        resetPassword,
+        changePassword,
       }}
     >
       {children}

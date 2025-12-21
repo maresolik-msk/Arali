@@ -54,6 +54,7 @@ import {
   type RevenueSource,
 } from '../data/dashboardData';
 import { productsApi, customersApi, ordersApi, revenueSourcesApi, initApi } from '../services/api';
+import { shopSettingsApi, type ShopSettings } from '../services/api';
 
 // Mock data for the dashboard
 const metrics = [
@@ -195,6 +196,7 @@ export function Dashboard() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [revenueSources, setRevenueSources] = useState<RevenueSource[]>([]);
+  const [shopName, setShopName] = useState<string>('My Shop');
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   
@@ -218,54 +220,84 @@ export function Dashboard() {
     const loadDashboardData = async () => {
       try {
         setIsLoading(true);
+        console.log('Starting dashboard data load...');
         
         // Fetch all data from backend
-        const [productsData, customersData, ordersData, revenueData] = await Promise.all([
-          productsApi.getAll(),
-          customersApi.getAll(),
-          ordersApi.getAll(),
-          revenueSourcesApi.getAll(),
+        const [productsData, customersData, ordersData, revenueData, shopSettings] = await Promise.all([
+          productsApi.getAll().catch(err => {
+            console.error('Failed to load products:', err);
+            return [];
+          }),
+          customersApi.getAll().catch(err => {
+            console.error('Failed to load customers:', err);
+            return [];
+          }),
+          ordersApi.getAll().catch(err => {
+            console.error('Failed to load orders:', err);
+            return [];
+          }),
+          revenueSourcesApi.getAll().catch(err => {
+            console.error('Failed to load revenue sources:', err);
+            return [];
+          }),
+          shopSettingsApi.get().catch(err => {
+            console.error('Failed to load shop settings:', err);
+            return { shopName: 'My Shop', shopAddress: '', contactEmail: '' };
+          }),
         ]);
 
-        // Check if database is empty (first time load)
-        if (productsData.length === 0) {
-          console.log('Database is empty, initializing with default data...');
-          
-          // Initialize database with default data
-          await initApi.initialize({
-            products: initialProducts,
-            customers: initialCustomers,
-            orders: initialOrders,
-            revenueSources: initialRevenueSources,
-          });
+        console.log('Data loaded from backend:', {
+          products: productsData?.length || 0,
+          customers: customersData?.length || 0,
+          orders: ordersData?.length || 0,
+          revenueSources: revenueData?.length || 0,
+        });
 
-          // Set state with initial data
-          setProducts(initialProducts);
-          setCustomers(initialCustomers);
-          setOrders(initialOrders);
-          setRevenueSources(initialRevenueSources);
-          
-          toast.success('Database initialized successfully!');
+        // Load data from backend (empty arrays for new users)
+        setProducts(productsData || []);
+        setCustomers(customersData || []);
+        setOrders(ordersData || []);
+        setRevenueSources(revenueData || []);
+        setShopName(shopSettings.shopName || 'My Shop');
+        
+        const totalItems = (productsData?.length || 0) + (customersData?.length || 0) + (ordersData?.length || 0);
+        
+        if (totalItems === 0) {
+          toast.success('Welcome! Start by adding your first product to get started.');
         } else {
-          // Load existing data from database
-          setProducts(productsData);
-          setCustomers(customersData);
-          setOrders(ordersData);
-          setRevenueSources(revenueData);
-          
           console.log(`Loaded ${productsData.length} products, ${customersData.length} customers, ${ordersData.length} orders from database`);
         }
 
         setIsInitialized(true);
       } catch (error) {
         console.error('Error loading dashboard data:', error);
-        toast.error('Failed to load dashboard data. Please refresh the page.');
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        toast.error(`Failed to load dashboard data: ${errorMessage}. Please try refreshing the page.`);
+        
+        // Start with empty data if error
+        setProducts([]);
+        setCustomers([]);
+        setOrders([]);
+        setRevenueSources([]);
+        setIsInitialized(true);
       } finally {
         setIsLoading(false);
       }
     };
 
     loadDashboardData();
+
+    // Reload data when window gains focus (user returns to the tab/app)
+    const handleFocus = () => {
+      console.log('Window focused - reloading dashboard data...');
+      loadDashboardData();
+    };
+
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   // Computed data using helper functions
@@ -375,7 +407,7 @@ export function Dashboard() {
       >
         {/* Header */}
         <motion.div variants={itemVariants} className="space-y-2">
-          <h1 className="text-foreground">Dashboard Overview</h1>
+          <h1 className="text-foreground">{shopName} - Dashboard</h1>
           <p className="text-muted-foreground">Welcome back! Here's what's happening with your store today.</p>
         </motion.div>
 
@@ -770,10 +802,10 @@ export function Dashboard() {
             <div className="p-6 rounded-2xl bg-gradient-to-br from-[#0F4C81]/10 to-[#0F4C81]/5 border border-[#0F4C81]/20">
               <p className="text-muted-foreground mb-2">Total Orders (This Month)</p>
               <div className="flex items-end gap-3">
-                <h2 className="text-[#0F4C81]">1,234</h2>
+                <h2 className="text-[#0F4C81]">{dashboardMetrics.totalOrders.toLocaleString('en-IN')}</h2>
                 <div className="flex items-center gap-1 text-green-600 mb-2">
                   <TrendingUp className="w-5 h-5" />
-                  <span>+8.2%</span>
+                  <span>{dashboardMetrics.ordersChange}</span>
                 </div>
               </div>
             </div>
@@ -955,87 +987,32 @@ export function Dashboard() {
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Users className="w-5 h-5" />
-              Customers Overview
+              Customers
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-6 py-4">
-            {/* Total Customers Summary */}
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-[#0F4C81]/10 to-[#0F4C81]/5 border border-[#0F4C81]/20">
-              <p className="text-muted-foreground mb-2">Total Customers</p>
-              <div className="flex items-end gap-3 mb-4">
-                <h2 className="text-[#0F4C81]">2,845</h2>
-                <div className="flex items-center gap-1 text-green-600 mb-2">
-                  <TrendingUp className="w-5 h-5" />
-                  <span>+15.4%</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center p-3 rounded-lg bg-white/50">
-                  <p className="text-muted-foreground mb-1">New Customers</p>
-                  <p className="text-foreground">{customersStats.new}</p>
-                </div>
-                <div className="text-center p-3 rounded-lg bg-white/50">
-                  <p className="text-muted-foreground mb-1">Returning</p>
-                  <p className="text-foreground">{customersStats.returning}</p>
-                </div>
+          
+          {/* Coming Soon Content */}
+          <div className="py-12 text-center space-y-4">
+            <div className="relative inline-block">
+              <div className="absolute inset-0 bg-[#0F4C81]/10 rounded-full blur-2xl animate-pulse" />
+              <div className="relative p-6 rounded-full bg-gradient-to-br from-[#0F4C81]/10 to-[#0F4C81]/5">
+                <Users className="w-12 h-12 text-[#0F4C81]" />
               </div>
             </div>
-
-            {/* Customer Segments */}
-            <div className="space-y-4">
-              <h3 className="text-foreground">Customer Segments</h3>
-              {customerSegments.map((segment) => (
-                <div 
-                  key={segment.type}
-                  className="p-4 rounded-xl bg-gradient-to-r from-[#0F4C81]/5 to-transparent border border-[#0F4C81]/10"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex-1">
-                      <p className="text-foreground mb-1">{segment.type}</p>
-                      <p className="text-muted-foreground">{segment.percentage}% of customers • Avg: ₹{segment.avgSpend.toLocaleString('en-IN')}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-foreground">{segment.count}</p>
-                    </div>
-                  </div>
-                  {/* Progress Bar */}
-                  <div className="w-full h-2 bg-[#0F4C81]/10 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-[#0F4C81] rounded-full transition-all duration-500"
-                      style={{ width: `${segment.percentage}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+            
+            <div>
+              <h3 className="text-[#0F4C81] mb-2">Customer Management Coming Soon</h3>
+              <p className="text-muted-foreground max-w-md mx-auto">
+                We're building an amazing customer management system. Track customer interactions, purchase history, and build lasting relationships.
+              </p>
             </div>
-
-            {/* Top Customers */}
-            <div className="space-y-4">
-              <h3 className="text-foreground">Top Customers</h3>
-              <div className="space-y-3">
-                {topCustomersList.map((customer, index) => (
-                  <div 
-                    key={customer.name}
-                    className="flex items-center justify-between p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10"
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="w-8 h-8 rounded-full bg-[#0F4C81]/10 flex items-center justify-center">
-                        <span className="text-[#0F4C81]">#{index + 1}</span>
-                      </div>
-                      <div>
-                        <p className="text-foreground">{customer.name}</p>
-                        <p className="text-muted-foreground">Joined {customer.joinedDate}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-foreground">{customer.totalSpent}</p>
-                      <p className="text-muted-foreground">{customer.orders} orders</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            
+            <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-[#0F4C81]/10 to-[#0F4C81]/5 border border-[#0F4C81]/20">
+              <CircleAlert className="w-4 h-4 text-[#0F4C81]" />
+              <span className="text-[#0F4C81] font-medium">Under Development</span>
             </div>
           </div>
+
           <div className="flex gap-3 pt-2">
             <Button 
               className="flex-1 bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/30"

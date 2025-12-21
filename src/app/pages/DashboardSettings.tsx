@@ -4,6 +4,8 @@ import { Settings as SettingsIcon, Store, Bell, User, CreditCard } from 'lucide-
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
+import { shopSettingsApi, type ShopSettings } from '../services/api';
+import { toast } from 'sonner';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -19,17 +21,56 @@ const itemVariants = {
 };
 
 export function DashboardSettings() {
-  const [storeName, setStoreName] = React.useState('Green Valley Grocers');
-  const [storeAddress, setStoreAddress] = React.useState('123 Main Street, City, State 12345');
+  const [storeName, setStoreName] = React.useState('');
+  const [storeAddress, setStoreAddress] = React.useState('');
+  const [contactEmail, setContactEmail] = React.useState('');
   const [fullName, setFullName] = React.useState('John Doe');
   const [phoneNumber, setPhoneNumber] = React.useState('+1 (555) 123-4567');
+  const [isLoading, setIsLoading] = React.useState(true);
 
-  const handleSaveStoreSettings = () => {
-    alert(`Store settings saved!\n\nStore Name: ${storeName}\nAddress: ${storeAddress}`);
+  // Load shop settings on mount
+  React.useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await shopSettingsApi.get();
+        setStoreName(settings.shopName || '');
+        setStoreAddress(settings.shopAddress || '');
+        setContactEmail(settings.contactEmail || '');
+      } catch (error) {
+        console.error('Error loading shop settings:', error);
+        toast.error('Failed to load shop settings');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  const handleSaveStoreSettings = async () => {
+    try {
+      await shopSettingsApi.update({
+        shopName: storeName,
+        shopAddress: storeAddress,
+        contactEmail: contactEmail,
+      });
+      toast.success('Store settings saved successfully!');
+    } catch (error) {
+      console.error('Error saving store settings:', error);
+      toast.error('Failed to save store settings');
+    }
   };
 
   const handleUpdateProfile = () => {
-    alert(`Profile updated!\n\nName: ${fullName}\nPhone: ${phoneNumber}`);
+    const settings: ShopSettings = {
+      storeName,
+      storeAddress,
+      fullName,
+      phoneNumber
+    };
+    shopSettingsApi.update(settings)
+      .then(() => toast.success('Profile updated!'))
+      .catch(() => toast.error('Failed to update profile.'));
   };
 
   const handleChangePassword = () => {
@@ -90,7 +131,8 @@ export function DashboardSettings() {
                   <label className="text-foreground mb-2 block">Contact Email</label>
                   <input
                     type="email"
-                    defaultValue="contact@mystore.com"
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
                     className="w-full h-12 px-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10 focus:border-[#0F4C81]/30 focus:bg-white transition-all outline-none"
                   />
                 </div>

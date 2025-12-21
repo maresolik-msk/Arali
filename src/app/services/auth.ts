@@ -74,6 +74,7 @@ export async function signIn(email: string, password: string): Promise<AuthState
   // Store auth state
   localStorage.setItem('auth_token', data.session.access_token);
   localStorage.setItem('user', JSON.stringify(user));
+  sessionStorage.setItem('access_token', data.session.access_token);
 
   return {
     user,
@@ -87,6 +88,7 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
   localStorage.removeItem('auth_token');
   localStorage.removeItem('user');
+  sessionStorage.removeItem('access_token');
 }
 
 // Get current session
@@ -131,6 +133,7 @@ export async function getCurrentSession(): Promise<AuthState> {
   // Update localStorage
   localStorage.setItem('auth_token', data.session.access_token);
   localStorage.setItem('user', JSON.stringify(user));
+  sessionStorage.setItem('access_token', data.session.access_token);
 
   return {
     user,
@@ -142,4 +145,28 @@ export async function getCurrentSession(): Promise<AuthState> {
 // Get access token for API requests
 export function getAccessToken(): string | null {
   return localStorage.getItem('auth_token');
+}
+
+// Send password reset email
+export async function sendPasswordResetEmail(email: string): Promise<void> {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/login?reset=true`,
+  });
+
+  if (error) {
+    console.error('Password reset error:', error);
+    throw new Error(error.message || 'Failed to send password reset email');
+  }
+}
+
+// Update password (used after clicking the reset link)
+export async function updatePassword(newPassword: string): Promise<void> {
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
+
+  if (error) {
+    console.error('Password update error:', error);
+    throw new Error(error.message || 'Failed to update password');
+  }
 }

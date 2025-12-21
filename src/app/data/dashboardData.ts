@@ -4,13 +4,18 @@ export interface Product {
   id: number;
   name: string;
   category: string;
-  price: number;
+  price: number; // Keep for backwards compatibility, will represent selling price
+  costPrice: number; // Price bought from vendor
+  sellingPrice: number; // Price sold to customers
   stock: number;
   threshold: number;
+  alertEnabled: boolean; // Enable/disable low stock alerts
   sku: string;
   description?: string;
+  vendorType?: string; // Type/name of vendor
   unitsSold: number;
   revenue: number;
+  expiryDate?: string; // ISO date string format
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,6 +54,24 @@ export interface Customer {
   notes?: string;
 }
 
+export interface Vendor {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  address?: string;
+  company: string;
+  category: string; // e.g., "Beverages", "Dairy", "Groceries"
+  totalProducts: number; // Number of products supplied
+  totalPurchases: number; // Total amount spent purchasing from this vendor
+  joinedDate: Date;
+  lastOrderDate?: Date;
+  rating: number; // 1-5 rating
+  status: 'Active' | 'Inactive';
+  paymentTerms?: string; // e.g., "Net 30", "COD"
+  notes?: string;
+}
+
 export interface RevenueSource {
   id: number;
   category: 'Product Sales' | 'Service Fees' | 'Subscriptions' | 'Other';
@@ -68,6 +91,21 @@ export interface LowStockAlert {
   threshold: number;
   category: string;
   lastRestocked?: Date;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'low_stock' | 'out_of_stock' | 'order_status' | 'new_customer' | 'general';
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: Date;
+  relatedTo?: {
+    type: 'product' | 'order' | 'customer';
+    id: number | string;
+    name?: string;
+  };
 }
 
 export interface DashboardMetrics {
@@ -116,10 +154,14 @@ export const initialProducts: Product[] = [
     name: 'Organic Coffee Beans',
     category: 'Beverages',
     price: 450,
+    costPrice: 300,
+    sellingPrice: 450,
     stock: 12,
     threshold: 50,
+    alertEnabled: true,
     sku: 'BEV-001',
     description: 'Premium organic coffee beans from Karnataka',
+    vendorType: 'Karnataka Coffee Co.',
     unitsSold: 340,
     revenue: 153000,
     createdAt: new Date('2024-01-15'),
@@ -130,10 +172,14 @@ export const initialProducts: Product[] = [
     name: 'Greek Yogurt',
     category: 'Dairy',
     price: 120,
+    costPrice: 80,
+    sellingPrice: 120,
     stock: 45,
     threshold: 30,
+    alertEnabled: true,
     sku: 'DAI-001',
     description: 'Fresh Greek yogurt with probiotics',
+    vendorType: 'Dairy Farm',
     unitsSold: 1050,
     revenue: 126000,
     createdAt: new Date('2024-01-20'),
@@ -144,10 +190,14 @@ export const initialProducts: Product[] = [
     name: 'Olive Oil',
     category: 'Groceries',
     price: 650,
+    costPrice: 400,
+    sellingPrice: 650,
     stock: 78,
     threshold: 40,
+    alertEnabled: true,
     sku: 'GRO-001',
     description: 'Extra virgin olive oil',
+    vendorType: 'Olive Oil Mill',
     unitsSold: 306,
     revenue: 198900,
     createdAt: new Date('2024-02-01'),
@@ -158,10 +208,14 @@ export const initialProducts: Product[] = [
     name: 'Brown Rice',
     category: 'Groceries',
     price: 180,
+    costPrice: 120,
+    sellingPrice: 180,
     stock: 92,
     threshold: 60,
+    alertEnabled: true,
     sku: 'GRO-002',
     description: 'Organic brown rice',
+    vendorType: 'Rice Farm',
     unitsSold: 347,
     revenue: 62460,
     createdAt: new Date('2024-02-05'),
@@ -172,10 +226,14 @@ export const initialProducts: Product[] = [
     name: 'Almond Milk',
     category: 'Beverages',
     price: 220,
+    costPrice: 150,
+    sellingPrice: 220,
     stock: 8,
     threshold: 30,
+    alertEnabled: true,
     sku: 'BEV-002',
     description: 'Unsweetened almond milk',
+    vendorType: 'Almond Milk Co.',
     unitsSold: 245,
     revenue: 53900,
     createdAt: new Date('2024-02-10'),
@@ -186,10 +244,14 @@ export const initialProducts: Product[] = [
     name: 'Whole Wheat Bread',
     category: 'Bakery',
     price: 45,
+    costPrice: 30,
+    sellingPrice: 45,
     stock: 5,
     threshold: 25,
+    alertEnabled: true,
     sku: 'BAK-001',
     description: 'Fresh whole wheat bread',
+    vendorType: 'Bakery',
     unitsSold: 678,
     revenue: 30510,
     createdAt: new Date('2024-02-15'),
@@ -200,10 +262,14 @@ export const initialProducts: Product[] = [
     name: 'Fresh Spinach',
     category: 'Vegetables',
     price: 40,
+    costPrice: 25,
+    sellingPrice: 40,
     stock: 15,
     threshold: 40,
+    alertEnabled: true,
     sku: 'VEG-001',
     description: 'Fresh organic spinach',
+    vendorType: 'Vegetable Farm',
     unitsSold: 523,
     revenue: 20920,
     createdAt: new Date('2024-03-01'),
@@ -433,7 +499,7 @@ export const initialSalesData: SalesDataPoint[] = [
 
 export const getLowStockProducts = (products: Product[]): LowStockAlert[] => {
   return products
-    .filter(product => product.stock <= product.threshold)
+    .filter(product => product.stock <= product.threshold && product.alertEnabled)
     .map(product => ({
       id: product.id,
       productId: product.id,
@@ -446,25 +512,35 @@ export const getLowStockProducts = (products: Product[]): LowStockAlert[] => {
 };
 
 export const getTopProductsByRevenue = (products: Product[], limit: number = 4) => {
+  if (!products || products.length === 0) {
+    return [];
+  }
+  
   return [...products]
-    .sort((a, b) => b.revenue - a.revenue)
+    .filter(p => p && typeof p.revenue === 'number')
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
     .slice(0, limit)
     .map(p => ({
-      name: p.name,
-      revenue: `₹${p.revenue.toLocaleString('en-IN')}`,
-      units: p.unitsSold,
+      name: p.name || 'Unknown',
+      revenue: `₹${(p.revenue || 0).toLocaleString('en-IN')}`,
+      units: p.unitsSold || 0,
     }));
 };
 
 export const getTopProductsBySales = (products: Product[], limit: number = 4) => {
+  if (!products || products.length === 0) {
+    return [];
+  }
+  
   return [...products]
-    .sort((a, b) => b.unitsSold - a.unitsSold)
+    .filter(p => p && typeof p.unitsSold === 'number')
+    .sort((a, b) => (b.unitsSold || 0) - (a.unitsSold || 0))
     .slice(0, limit)
     .map(p => ({
-      name: p.name,
-      sold: p.unitsSold,
-      stock: p.stock,
-      category: p.category,
+      name: p.name || 'Unknown',
+      sold: p.unitsSold || 0,
+      stock: p.stock || 0,
+      category: p.category || 'Uncategorized',
     }));
 };
 
@@ -501,11 +577,17 @@ export const getOrdersByStatus = (orders: Order[]) => {
 
 export const getRecentOrders = (orders: Order[], limit: number = 5) => {
   return [...orders]
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .sort((a, b) => {
+      // Handle both Date objects and date strings
+      const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+      const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+      return dateB.getTime() - dateA.getTime();
+    })
     .slice(0, limit)
     .map(order => {
       const now = new Date();
-      const diff = now.getTime() - order.createdAt.getTime();
+      const createdAt = order.createdAt instanceof Date ? order.createdAt : new Date(order.createdAt);
+      const diff = now.getTime() - createdAt.getTime();
       const minutes = Math.floor(diff / 60000);
       const hours = Math.floor(minutes / 60);
       
@@ -607,19 +689,27 @@ export const getTopCustomers = (customers: Customer[], limit: number = 4) => {
   return [...customers]
     .sort((a, b) => b.totalSpent - a.totalSpent)
     .slice(0, limit)
-    .map(c => ({
-      name: c.name,
-      orders: c.totalOrders,
-      totalSpent: `₹${c.totalSpent.toLocaleString('en-IN')}`,
-      joinedDate: c.joinedDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-    }));
+    .map(c => {
+      // Handle both Date objects and date strings
+      const joinedDate = c.joinedDate instanceof Date ? c.joinedDate : new Date(c.joinedDate);
+      return {
+        name: c.name,
+        orders: c.totalOrders,
+        totalSpent: `₹${c.totalSpent.toLocaleString('en-IN')}`,
+        joinedDate: joinedDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      };
+    });
 };
 
 export const getCustomersStats = (customers: Customer[]) => {
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   
-  const newCustomers = customers.filter(c => c.joinedDate >= thirtyDaysAgo).length;
+  const newCustomers = customers.filter(c => {
+    // Handle both Date objects and date strings
+    const joinedDate = c.joinedDate instanceof Date ? c.joinedDate : new Date(c.joinedDate);
+    return joinedDate >= thirtyDaysAgo;
+  }).length;
   const returning = customers.filter(c => c.totalOrders > 1).length;
 
   return {
@@ -636,7 +726,8 @@ export const calculateDashboardMetrics = (
   customers: Customer[],
   revenueSources: RevenueSource[]
 ): DashboardMetrics => {
-  const totalRevenue = revenueSources.reduce((sum, r) => sum + r.amount, 0);
+  // Calculate total revenue from products' revenue field
+  const totalRevenue = products.reduce((sum, p) => sum + (p.revenue || 0), 0);
   
   return {
     totalRevenue,
@@ -727,3 +818,174 @@ export const updateCustomer = (customers: Customer[], id: number, updates: Parti
       : c
   );
 };
+
+// Vendor CRUD Operations
+
+export const addVendor = (vendors: Vendor[], newVendor: Omit<Vendor, 'id' | 'joinedDate'>): Vendor[] => {
+  const maxId = vendors.reduce((max, v) => Math.max(max, v.id), 0);
+  const vendor: Vendor = {
+    ...newVendor,
+    id: maxId + 1,
+    joinedDate: new Date(),
+  };
+  return [...vendors, vendor];
+};
+
+export const updateVendor = (vendors: Vendor[], id: number, updates: Partial<Vendor>): Vendor[] => {
+  return vendors.map(v => 
+    v.id === id 
+      ? { ...v, ...updates }
+      : v
+  );
+};
+
+export const deleteVendor = (vendors: Vendor[], id: number): Vendor[] => {
+  return vendors.filter(v => v.id !== id);
+};
+
+export const getTopVendors = (vendors: Vendor[], limit: number = 5) => {
+  return [...vendors]
+    .sort((a, b) => b.totalPurchases - a.totalPurchases)
+    .slice(0, limit)
+    .map(v => {
+      const joinedDate = v.joinedDate instanceof Date ? v.joinedDate : new Date(v.joinedDate);
+      return {
+        name: v.name,
+        company: v.company,
+        totalProducts: v.totalProducts,
+        totalPurchases: `₹${v.totalPurchases.toLocaleString('en-IN')}`,
+        rating: v.rating,
+        status: v.status,
+      };
+    });
+};
+
+export const getVendorsByStatus = (vendors: Vendor[]) => {
+  return {
+    active: vendors.filter(v => v.status === 'Active').length,
+    inactive: vendors.filter(v => v.status === 'Inactive').length,
+    total: vendors.length,
+  };
+};
+
+// Initial vendor data
+export const initialVendors: Vendor[] = [
+  {
+    id: 1,
+    name: 'Rajesh Kumar',
+    email: 'rajesh@karnatakacc.com',
+    phone: '+91 98765 11111',
+    address: 'Coffee Estate, Chikmagalur, Karnataka',
+    company: 'Karnataka Coffee Co.',
+    category: 'Beverages',
+    totalProducts: 3,
+    totalPurchases: 45000,
+    joinedDate: new Date('2024-01-10'),
+    lastOrderDate: new Date('2024-12-15'),
+    rating: 5,
+    status: 'Active',
+    paymentTerms: 'Net 30',
+    notes: 'Premium quality organic coffee beans supplier',
+  },
+  {
+    id: 2,
+    name: 'Amit Patel',
+    email: 'amit@dairyfarm.com',
+    phone: '+91 98765 22222',
+    address: 'Dairy Farm Complex, Anand, Gujarat',
+    company: 'Dairy Farm',
+    category: 'Dairy',
+    totalProducts: 5,
+    totalPurchases: 84000,
+    joinedDate: new Date('2024-01-15'),
+    lastOrderDate: new Date('2024-12-20'),
+    rating: 5,
+    status: 'Active',
+    paymentTerms: 'Net 15',
+    notes: 'Fresh dairy products, excellent quality',
+  },
+  {
+    id: 3,
+    name: 'Maria Fernandes',
+    email: 'maria@oliveoilmill.com',
+    phone: '+91 98765 33333',
+    address: 'Oil Mill Road, Nashik, Maharashtra',
+    company: 'Olive Oil Mill',
+    category: 'Groceries',
+    totalProducts: 2,
+    totalPurchases: 122400,
+    joinedDate: new Date('2024-01-20'),
+    lastOrderDate: new Date('2024-12-18'),
+    rating: 4,
+    status: 'Active',
+    paymentTerms: 'Net 30',
+    notes: 'Extra virgin olive oil supplier',
+  },
+  {
+    id: 4,
+    name: 'Suresh Reddy',
+    email: 'suresh@ricefarm.com',
+    phone: '+91 98765 44444',
+    address: 'Farm House, Warangal, Telangana',
+    company: 'Rice Farm',
+    category: 'Groceries',
+    totalProducts: 4,
+    totalPurchases: 41640,
+    joinedDate: new Date('2024-02-01'),
+    lastOrderDate: new Date('2024-12-19'),
+    rating: 5,
+    status: 'Active',
+    paymentTerms: 'COD',
+    notes: 'Organic rice and grains',
+  },
+  {
+    id: 5,
+    name: 'Priya Singh',
+    email: 'priya@almondmilkco.com',
+    phone: '+91 98765 55555',
+    address: 'Industrial Area, Ludhiana, Punjab',
+    company: 'Almond Milk Co.',
+    category: 'Beverages',
+    totalProducts: 2,
+    totalPurchases: 36750,
+    joinedDate: new Date('2024-02-05'),
+    lastOrderDate: new Date('2024-12-17'),
+    rating: 4,
+    status: 'Active',
+    paymentTerms: 'Net 30',
+  },
+  {
+    id: 6,
+    name: 'Thomas Matthew',
+    email: 'thomas@bakery.com',
+    phone: '+91 98765 66666',
+    address: 'Baker Street, Kochi, Kerala',
+    company: 'Bakery',
+    category: 'Bakery',
+    totalProducts: 6,
+    totalPurchases: 20340,
+    joinedDate: new Date('2024-02-10'),
+    lastOrderDate: new Date('2024-12-21'),
+    rating: 5,
+    status: 'Active',
+    paymentTerms: 'Net 7',
+    notes: 'Fresh baked goods daily',
+  },
+  {
+    id: 7,
+    name: 'Lakshmi Krishnan',
+    email: 'lakshmi@vegetablefarm.com',
+    phone: '+91 98765 77777',
+    address: 'Farm Land, Ooty, Tamil Nadu',
+    company: 'Vegetable Farm',
+    category: 'Vegetables',
+    totalProducts: 8,
+    totalPurchases: 13075,
+    joinedDate: new Date('2024-02-20'),
+    lastOrderDate: new Date('2024-12-20'),
+    rating: 4,
+    status: 'Active',
+    paymentTerms: 'COD',
+    notes: 'Fresh organic vegetables',
+  },
+];

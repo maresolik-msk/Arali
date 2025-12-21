@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -15,12 +15,15 @@ import {
   Search,
   ChevronDown,
   Store,
+  Truck,
 } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { Button } from '../ui/button';
 import { cn } from '../ui/utils';
 import { Toaster } from '../ui/sonner';
 import { useAuth } from '../../contexts/AuthContext';
+import { NotificationCenter } from './NotificationCenter';
+import { notificationsApi } from '../../services/api';
 
 const navItems = [
   {
@@ -44,6 +47,11 @@ const navItems = [
     icon: Users,
   },
   {
+    title: 'Vendors',
+    href: '/dashboard/vendors',
+    icon: Truck,
+  },
+  {
     title: 'Analytics',
     href: '/dashboard/analytics',
     icon: ChartLine,
@@ -58,9 +66,37 @@ const navItems = [
 export function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
   const { signOut } = useAuth();
+
+  // Load unread notification count
+  useEffect(() => {
+    loadUnreadCount();
+    // Poll for updates every 30 seconds
+    const interval = setInterval(loadUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadUnreadCount = async () => {
+    try {
+      const count = await notificationsApi.getUnreadCount();
+      setUnreadCount(count);
+    } catch (error) {
+      console.error('Failed to load unread count:', error);
+    }
+  };
+
+  const handleNotificationClick = () => {
+    setNotificationCenterOpen(true);
+  };
+
+  const handleNotificationClose = () => {
+    setNotificationCenterOpen(false);
+    loadUnreadCount(); // Reload count when closing
+  };
 
   const isActive = (path: string) => {
     if (path === '/dashboard') {
@@ -254,9 +290,14 @@ export function DashboardLayout() {
 
             {/* Right Actions */}
             <div className="flex items-center gap-2">
-              <button className="p-3 rounded-full hover:bg-[#0F4C81]/5 transition-colors relative">
+              <button
+                className="p-3 rounded-full hover:bg-[#0F4C81]/5 transition-colors relative"
+                onClick={handleNotificationClick}
+              >
                 <Bell className="w-5 h-5 text-[#0F4C81]" />
-                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full" />
+                )}
               </button>
               <div className="hidden md:flex items-center gap-3 px-4 py-2 rounded-full bg-[#0F4C81]/5">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0F4C81] to-[#0F4C81]/70 flex items-center justify-center text-white">
@@ -274,6 +315,10 @@ export function DashboardLayout() {
         </main>
       </div>
       <Toaster />
+      <NotificationCenter
+        isOpen={notificationCenterOpen}
+        onClose={handleNotificationClose}
+      />
     </div>
   );
 }
