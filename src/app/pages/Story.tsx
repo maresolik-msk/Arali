@@ -39,14 +39,14 @@ export function Story() {
           </motion.div>
 
           <motion.div 
-            initial={{ opacity: 0, scale: 0.98 }}
+            initial={{ opacity: 0, scale: 0.95 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
+            transition={{ duration: 0.6 }}
             className="relative rounded-3xl overflow-hidden aspect-video shadow-xl"
           >
             <img 
-              src="https://images.unsplash.com/photo-1694427367174-eabda4e0398a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzbWFsbCUyMHNob3AlMjBmcm9udCUyMG1pbmltYWwlMjBleHRlcmlvcnxlbnwxfHx8fDE3NjU5MDI3MDF8MA&ixlib=rb-4.1.0&q=80&w=1080"
+              src="https://images.unsplash.com/photo-1765376260865-98c52cd9c0e4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxyZXRhaWwlMjBzaG9wJTIwZXh0ZXJpb3J8ZW58MXx8fHwxNzY2NjM3NDUyfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
               alt="Quiet shop front"
               className="w-full h-full object-cover"
             />

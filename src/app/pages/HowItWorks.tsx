@@ -13,35 +13,35 @@ export function HowItWorks() {
   const steps = [
     {
       id: "01",
-      title: "Purchase Entry",
+      title: "Log Your Stock",
       desc: "Log new stock in seconds. Just tap, select category, and add expiry date. No complex forms or barcodes needed if you don't want them.",
       icon: Plus,
       color: "bg-[#0F4C81]/5 text-[#0F4C81]",
-      image: "https://images.unsplash.com/photo-1489925461942-d8f490a04588?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzbWFsbCUyMHJldGFpbCUyMHNob3AlMjBvd25lciUyMGNhbG0lMjB0YWJsZXQlMjBpbnZlbnRvcnklMjBuYXR1cmFsJTIwbGlnaHR8ZW58MXx8fHwxNzY1OTAzNTY3fDA&ixlib=rb-4.1.0&q=80&w=1080"
+      image: "https://images.unsplash.com/photo-1764795849885-e226e3cabe87?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxyZXRhaWwlMjBpbnZlbnRvcnklMjBtYW5hZ2VtZW50fGVufDF8fHx8MTc2NjY0NTYyMnww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
     },
     {
       id: "02",
-      title: "Expiry Tracking",
+      title: "Watch Freshness",
       desc: "Arali quietly watches your inventory. Items are sorted by freshness, so you always know what needs to be sold first.",
       icon: Clock,
       color: "bg-[#0F4C81]/10 text-[#0F4C81]",
-      image: "https://images.unsplash.com/photo-1554232386-c0e7b910d24f?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMHByb2R1Y2UlMjBiYXNrZXQlMjBvdmVyaGVhZCUyMHZpZXclMjBhZXN0aGV0aWN8ZW58MXx8fHwxNzY1OTAzNTc5fDA&ixlib=rb-4.1.0&q=80&w=1080"
+      image: "https://images.unsplash.com/photo-1722581248341-de9b34c116bb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMGdyb2NlcnklMjBzdG9yZXxlbnwxfHx8fDE3NjY2NDU2MjV8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
     },
     {
       id: "03",
-      title: "Alerts & Actions",
+      title: "Act Before Expiry",
       desc: "Get gentle notifications before items expire. Arali suggests actions: discount it, bundle it, or put it on display.",
       icon: Bell,
       color: "bg-[#0F4C81]/15 text-[#0F4C81]",
-      image: "https://images.unsplash.com/photo-1607783822349-805fc62715dd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwZXJzb24lMjBob2xkaW5nJTIwc21hcnRwaG9uZSUyMHNpbXBsZSUyMG5vdGlmaWNhdGlvbiUyMGNhbG18ZW58MXx8fHwxNzY1OTAzNTY3fDA&ixlib=rb-4.1.0&q=80&w=1080"
+      image: "https://images.unsplash.com/photo-1758520387659-9956c4516891?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzbWFydHBob25lJTIwbm90aWZpY2F0aW9ucyUyMHJldGFpbHxlbnwxfHx8fDE3NjY2NDU2Mjd8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
     },
     {
       id: "04",
-      title: "Weekly Summary",
+      title: "See Your Progress",
       desc: "Receive a simple Sunday report. See how much waste you prevented each week.",
       icon: ChartColumn,
       color: "bg-[#0F4C81]/20 text-[#0F4C81]",
-      image: "https://images.unsplash.com/photo-1655462502318-a5ff79542ce7?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaG9wJTIwb3duZXIlMjBzbWlsaW5nJTIwcGVhY2VmdWwlMjBzbWFsbCUyMGJ1c2luZXNzfGVufDF8fHx8MTc2NTkwMzU2N3ww&ixlib=rb-4.1.0&q=80&w=1080"
+      image: "https://images.unsplash.com/photo-1753351052617-62818ffc9173?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxoYXBweSUyMHNob3AlMjBvd25lciUyMGJ1c2luZXNzfGVufDF8fHx8MTc2NjY0NTYzMHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
     }
   ];
 

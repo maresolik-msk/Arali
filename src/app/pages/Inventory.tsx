@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
-import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon } from 'lucide-react';
+import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon, ScanLine } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -11,6 +11,10 @@ import { Switch } from '../components/ui/switch';
 import { toast } from 'sonner';
 import { productsApi, notificationsApi, vendorsApi } from '../services/api';
 import { generateProductImage } from '../services/ai';
+import { lookupProductByBarcode } from '../services/productLookup';
+import { parseVoiceCommand, generateVoiceSummary } from '../services/voiceParser';
+import { BarcodeScanner } from '../components/BarcodeScanner';
+import { VoiceInput } from '../components/VoiceInput';
 import imgMilk from "figma:asset/18cf32dc4edc4f7ccc61c9bea27f743107dbf224.png";
 import type { Product, Vendor } from '../data/dashboardData';
 
@@ -24,6 +28,7 @@ export function Inventory() {
   const [isRestockDialogOpen, setIsRestockDialogOpen] = useState(false);
   const [isRecordSalesDialogOpen, setIsRecordSalesDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [productToDelete, setProductToDelete] = useState<{ id: number; name: string } | null>(null);
   const [lowStockNotified, setLowStockNotified] = useState<Set<number>>(new Set());
@@ -199,87 +204,89 @@ export function Inventory() {
     
     // Find products with alerts enabled that are at or below threshold
     const lowStockProducts = inventoryItems.filter(
-      item => item.alertEnabled && item.stock > 0 && item.stock <= item.threshold
+      item => item.alertEnabled && item.stock > 0 && item.stock <= item.threshold && !lowStockNotified.has(item.id)
     );
     
     const outOfStockProducts = inventoryItems.filter(
-      item => item.alertEnabled && item.stock === 0
+      item => item.alertEnabled && item.stock === 0 && !lowStockNotified.has(item.id)
     );
     
-    // Show notifications for low stock products
+    // Show notifications for low stock products (only once per product)
     if (lowStockProducts.length > 0 && isMounted) {
       const productNames = lowStockProducts.map(p => p.name).join(', ');
+      const toastId = `low-stock-${lowStockProducts.map(p => p.id).join('-')}`;
+      
       toast.warning(`Low Stock Alert: ${lowStockProducts.length} product${lowStockProducts.length > 1 ? 's' : ''} running low`, {
+        id: toastId,
         description: productNames,
         duration: 5000,
       });
 
-      // Create app notifications for low stock products (only if not already notified)
+      // Create app notifications for low stock products
       lowStockProducts.forEach((product) => {
-        if (!lowStockNotified.has(product.id)) {
-          notificationsApi.create({
-            userId: '', // Will be set by backend
-            type: 'low_stock',
-            title: 'Low Stock Alert',
-            message: `${product.name} is running low. Only ${product.stock} units remaining (threshold: ${product.threshold}).`,
-            read: false,
-            relatedTo: {
-              type: 'product',
-              id: product.id,
-              name: product.name,
-            },
-          })
-          .then(() => {
-            if (isMounted) {
-              setLowStockNotified(prev => new Set([...prev, product.id]));
-            }
-          })
-          .catch(error => {
-            console.error('Failed to create notification:', error);
-          });
-        }
+        notificationsApi.create({
+          userId: '', // Will be set by backend
+          type: 'low_stock',
+          title: 'Low Stock Alert',
+          message: `${product.name} is running low. Only ${product.stock} units remaining (threshold: ${product.threshold}).`,
+          read: false,
+          relatedTo: {
+            type: 'product',
+            id: product.id,
+            name: product.name,
+          },
+        })
+        .then(() => {
+          if (isMounted) {
+            setLowStockNotified(prev => new Set([...prev, product.id]));
+          }
+        })
+        .catch(error => {
+          console.error('Failed to create notification:', error);
+        });
       });
     }
     
-    // Show notifications for out of stock products
+    // Show notifications for out of stock products (only once per product)
     if (outOfStockProducts.length > 0 && isMounted) {
       const productNames = outOfStockProducts.map(p => p.name).join(', ');
+      const toastId = `out-stock-${outOfStockProducts.map(p => p.id).join('-')}`;
+      
       toast.error(`Out of Stock: ${outOfStockProducts.length} product${outOfStockProducts.length > 1 ? 's' : ''}`, {
+        id: toastId,
         description: productNames,
         duration: 5000,
       });
 
-      // Create app notifications for out of stock products (only if not already notified)
+      // Create app notifications for out of stock products
       outOfStockProducts.forEach((product) => {
-        if (!lowStockNotified.has(product.id)) {
-          notificationsApi.create({
-            userId: '', // Will be set by backend
-            type: 'out_of_stock',
-            title: 'Out of Stock',
-            message: `${product.name} is out of stock. Please restock immediately.`,
-            read: false,
-            relatedTo: {
-              type: 'product',
-              id: product.id,
-              name: product.name,
-            },
-          })
-          .then(() => {
-            if (isMounted) {
-              setLowStockNotified(prev => new Set([...prev, product.id]));
-            }
-          })
-          .catch(error => {
-            console.error('Failed to create notification:', error);
-          });
-        }
+        notificationsApi.create({
+          userId: '', // Will be set by backend
+          type: 'out_of_stock',
+          title: 'Out of Stock',
+          message: `${product.name} is out of stock. Please restock immediately.`,
+          read: false,
+          relatedTo: {
+            type: 'product',
+            id: product.id,
+            name: product.name,
+          },
+        })
+        .then(() => {
+          if (isMounted) {
+            setLowStockNotified(prev => new Set([...prev, product.id]));
+          }
+        })
+        .catch(error => {
+          console.error('Failed to create notification:', error);
+        });
       });
     }
 
     return () => {
       isMounted = false; // Cleanup on unmount to prevent state updates
     };
-  }, [inventoryItems, isLoading]); // Removed lowStockNotified to prevent infinite loop
+  }, [inventoryItems, isLoading, lowStockNotified]); // Added lowStockNotified dependency
 
   // Get unique categories from existing products - OPTIMIZED with useMemo
   const uniqueCategories = useMemo(() => {
@@ -709,6 +716,122 @@ export function Inventory() {
     }
   };
 
+  const handleBarcodeScan = async (barcode: string) => {
+    setIsScannerOpen(false);
+    
+    const toastId = 'barcode-lookup-' + Date.now();
+    toast.loading('Looking up product...', { id: toastId });
+
+    try {
+      // Look up product information from barcode
+      const productInfo = await lookupProductByBarcode(barcode);
+
+      if (productInfo) {
+        // Pre-fill the form with product info
+        setNewProduct({
+          name: productInfo.name,
+          sku: barcode,
+          category: productInfo.category,
+          stock: '',
+          costPrice: '',
+          sellingPrice: '',
+          vendorType: productInfo.brand || '',
+          expiryDate: '',
+          alertEnabled: true,
+          threshold: '10',
+          imageUrl: productInfo.imageUrl || '',
+        });
+
+        toast.success(`Product found: ${productInfo.name}`, { id: toastId });
+        setIsAddDialogOpen(true);
+      } else {
+        // Product not found - still open dialog with barcode as SKU
+        setNewProduct(prev => ({
+          ...prev,
+          sku: barcode,
+        }));
+
+        toast.info('Product not found in database. Please enter details manually.', { 
+          id: toastId,
+          duration: 5000,
+        });
+        setIsAddDialogOpen(true);
+      }
+    } catch (error) {
+      console.error('Error looking up product:', error);
+      toast.error('Failed to lookup product', { id: toastId });
+      
+      // Still open the dialog with just the barcode
+      setNewProduct(prev => ({
+        ...prev,
+        sku: barcode,
+      }));
+      setIsAddDialogOpen(true);
+    }
+  };
+
+  const handleVoiceInput = (transcript: string) => {
+    const parsed = parseVoiceCommand(transcript);
+    const summary = generateVoiceSummary(parsed);
+
+    // Update form with parsed data
+    if (parsed.name) {
+      setNewProduct(prev => ({ ...prev, name: parsed.name || prev.name }));
+    }
+    if (parsed.quantity) {
+      setNewProduct(prev => ({ ...prev, stock: parsed.quantity?.toString() || prev.stock }));
+    }
+    if (parsed.price) {
+      setNewProduct(prev => ({ ...prev, sellingPrice: parsed.price?.toString() || prev.sellingPrice }));
+    }
+    if (parsed.expiryDate) {
+      setNewProduct(prev => ({ ...prev, expiryDate: parsed.expiryDate || prev.expiryDate }));
+    }
+
+    // Show what was understood
+    if (summary !== 'No data extracted') {
+      toast.success(`Understood: ${summary}`, { duration: 4000 });
+    }
+  };
+
+  const handleRestockVoiceInput = (transcript: string) => {
+    const parsed = parseVoiceCommand(transcript);
+    
+    if (parsed.quantity && restockingProduct) {
+      setRestockingProduct(prev => prev ? { ...prev, quantity: parsed.quantity?.toString() || prev.quantity } : null);
+      toast.success(`Quantity set to: ${parsed.quantity} units`);
+    }
+  };
+
+  const handleSalesVoiceInput = (transcript: string) => {
+    const parsed = parseVoiceCommand(transcript);
+    
+    if (parsed.quantity && recordingSalesProduct) {
+      setRecordingSalesProduct(prev => prev ? { ...prev, quantitySold: parsed.quantity?.toString() || prev.quantitySold } : null);
+      toast.success(`Quantity sold set to: ${parsed.quantity} units`);
+    }
+  };
+
+  const handleAddDialogChange = (open: boolean) => {
+    setIsAddDialogOpen(open);
+    // Reset form when dialog closes
+    if (!open) {
+      setNewProduct({
+        name: '',
+        sku: '',
+        category: '',
+        stock: '',
+        costPrice: '',
+        sellingPrice: '',
+        vendorType: '',
+        expiryDate: '',
+        alertEnabled: true,
+        threshold: '10',
+        imageUrl: '',
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F5F9FC] via-[#EBF4FA] to-[#F5F9FC]">
       <motion.div
@@ -723,10 +846,25 @@ export function Inventory() {
             <h1 className="text-foreground">Inventory Management</h1>
             <p className="text-muted-foreground">Manage your products and stock levels</p>
           </div>
-          <Button className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/20" onClick={() => setIsAddDialogOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Product
-          </Button>
+          <div className="flex gap-2">
+            {/* Temporarily hidden - Scan Barcode button
+            <Button 
+              variant="outline"
+              className="border-[#0F4C81] text-[#0F4C81] hover:bg-[#0F4C81]/10 rounded-full shadow-lg"
+              onClick={() => setIsScannerOpen(true)}
+            >
+              <ScanLine className="w-4 h-4 mr-2" />
+              Scan Barcode
+            </Button>
+            */}
+            <Button 
+              className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/20" 
+              onClick={() => setIsAddDialogOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Product
+            </Button>
+          </div>
         </div>
 
         {/* Search and Filters */}
@@ -845,7 +983,7 @@ export function Inventory() {
       </motion.div>
 
       {/* Add Product Dialog */}
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+      <Dialog open={isAddDialogOpen} onOpenChange={handleAddDialogChange}>
         <DialogContent className="sm:max-w-[500px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="add-product-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
@@ -900,13 +1038,19 @@ export function Inventory() {
 
             <div className="space-y-2">
               <Label htmlFor="name" className="text-[#0F4C81]">Product Name</Label>
-              <Input 
-                id="name" 
-                placeholder="e.g., Organic Coffee Beans"
-                value={newProduct.name} 
-                onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} 
-                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-              />
+              <div className="flex gap-2 items-center">
+                <Input 
+                  id="name" 
+                  placeholder="e.g., Organic Coffee Beans"
+                  value={newProduct.name} 
+                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })} 
+                  className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+                <VoiceInput onTranscript={handleVoiceInput} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                💡 Try: "Add 10 units of milk, expiring January 30th, price 50 rupees"
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="sku" className="text-[#0F4C81]">SKU</Label>
@@ -1287,14 +1431,20 @@ export function Inventory() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="quantity" className="text-[#0F4C81]">Restock Quantity</Label>
-              <Input 
-                id="quantity" 
-                type="number"
-                placeholder="0"
-                value={restockingProduct?.quantity || ''} 
-                onChange={(e) => setRestockingProduct({ ...restockingProduct!, quantity: e.target.value })} 
-                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-              />
+              <div className="flex gap-2 items-center">
+                <Input 
+                  id="quantity" 
+                  type="number"
+                  placeholder="0"
+                  value={restockingProduct?.quantity || ''} 
+                  onChange={(e) => setRestockingProduct({ ...restockingProduct!, quantity: e.target.value })} 
+                  className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+                <VoiceInput onTranscript={handleRestockVoiceInput} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                💡 Say: "50 units" or "add 20 pieces"
+              </p>
             </div>
           </div>
           <div className="flex gap-3 pt-2">
@@ -1361,14 +1511,20 @@ export function Inventory() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="quantitySold" className="text-[#0F4C81]">Quantity Sold</Label>
-              <Input 
-                id="quantitySold" 
-                type="number"
-                placeholder="0"
-                value={recordingSalesProduct?.quantitySold || ''} 
-                onChange={(e) => setRecordingSalesProduct({ ...recordingSalesProduct!, quantitySold: e.target.value })} 
-                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-              />
+              <div className="flex gap-2 items-center">
+                <Input 
+                  id="quantitySold" 
+                  type="number"
+                  placeholder="0"
+                  value={recordingSalesProduct?.quantitySold || ''} 
+                  onChange={(e) => setRecordingSalesProduct({ ...recordingSalesProduct!, quantitySold: e.target.value })} 
+                  className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+                <VoiceInput onTranscript={handleSalesVoiceInput} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                💡 Say: "sold 15 units" or "5 pieces"
+              </p>
             </div>
           </div>
           <div className="flex gap-3 pt-2">
@@ -1432,6 +1588,15 @@ export function Inventory() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Barcode Scanner - Temporarily hidden
+      {isScannerOpen && (
+        <BarcodeScanner
+          onScanSuccess={handleBarcodeScan}
+          onClose={() => setIsScannerOpen(false)}
+        />
+      )}
+      */}
     </div>
   );
 }

@@ -48,7 +48,7 @@ export function Features() {
         {/* Hero Banner */}
         <div className="w-full h-[300px] md:h-[400px] relative overflow-hidden mb-20">
              <img 
-               src="https://images.unsplash.com/photo-1631541911232-72bc7448820a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwc21hbGwlMjBzaG9wJTIwaW50ZXJpb3IlMjB3YXJtJTIwdG9uZXN8ZW58MXx8fHwxNzY1OTAzNTY3fDA&ixlib=rb-4.1.0&q=80&w=1080" 
+               src="https://images.unsplash.com/photo-1736236560164-bc741c70bca5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxyZXRhaWwlMjBzdG9yZSUyMGludGVyaW9yfGVufDF8fHx8MTc2NjU1NzkzMnww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral" 
                alt="Peaceful shop interior"
                className="w-full h-full object-cover"
              />

@@ -88,7 +88,7 @@ export function Home() {
             >
                 <div className="relative aspect-[4/5] md:aspect-square lg:aspect-[6/5] overflow-hidden rounded-[3rem]">
                   <img 
-                    src="https://images.unsplash.com/photo-1719399184282-d095c8782944?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwYm91dGlxdWUlMjBvd25lciUyMHRhYmxldCUyMGJsdWUlMjByZXRhaWx8ZW58MXx8fHwxNzY1OTg4NzU1fDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
+                    src="https://images.unsplash.com/photo-1753161029114-857c9f494ccd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaG9wJTIwb3duZXIlMjB0YWJsZXR8ZW58MXx8fHwxNzY2NjQ1NjEzfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
                     alt="Shop owner managing inventory"
                     className="w-full h-full object-cover grayscale-[10%]"
                   />
