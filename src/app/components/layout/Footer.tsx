@@ -2,17 +2,55 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { X, Linkedin, Instagram, Facebook } from 'lucide-react';
 import { Logo } from '../brand/Logo';
+import { toast } from 'sonner';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
   const [email, setEmail] = React.useState('');
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  const handleWaitlistSubmit = (e: React.FormEvent) => {
+  const handleWaitlistSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email) {
-      // Mock submission - in production, this would send to a backend
-      alert(`Thank you for joining the waitlist! We'll reach out to ${email} soon.`);
-      setEmail('');
+    if (!email) return;
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-29b58f9a/waitlist`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({ email }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        if (data.alreadyExists) {
+          toast.success("You're already on our waitlist!", {
+            description: "We'll notify you as soon as we launch.",
+          });
+        } else {
+          toast.success('Welcome to the Arali Waitlist! 🎉', {
+            description: "Check your email for confirmation. We'll be in touch soon!",
+          });
+        }
+        setEmail('');
+      } else {
+        throw new Error(data.error || 'Failed to join waitlist');
+      }
+    } catch (error) {
+      console.error('Waitlist error:', error);
+      toast.error('Failed to join waitlist', {
+        description: 'Please try again later.',
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -56,13 +94,15 @@ export function Footer() {
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             required
-                            className="bg-white/5 border border-white/10 rounded-full px-6 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-white transition-colors w-full md:w-auto min-w-[300px]"
+                            disabled={isSubmitting}
+                            className="bg-white/5 border border-white/10 rounded-full px-6 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-white transition-colors w-full md:w-auto min-w-[300px] disabled:opacity-50"
                         />
                         <button 
                             type="submit"
-                            className="bg-white text-[#0F4C81] rounded-full px-8 py-3 font-medium hover:bg-gray-100 transition-colors shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)]"
+                            disabled={isSubmitting}
+                            className="bg-white text-[#0F4C81] rounded-full px-8 py-3 font-medium hover:bg-gray-100 transition-colors shadow-[0_0_20px_-5px_rgba(255,255,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            Join Waitlist
+                            {isSubmitting ? 'Joining...' : 'Join Waitlist'}
                         </button>
                      </form>
                 </div>
@@ -120,7 +160,7 @@ export function Footer() {
                             <Linkedin className="w-4 h-4" />
                         </button>
                         <button 
-                            onClick={() => handleSocialClick('instagram')}
+                            onClick={() => window.open('https://www.instagram.com/arali.msk/', '_blank')}
                             className="p-2 rounded-full border border-white/10 hover:border-white hover:bg-white/10 text-white/40 hover:text-white transition-all"
                             aria-label="Instagram"
                         >
@@ -159,6 +199,13 @@ export function Footer() {
                  <div className="text-xs font-mono text-white/40 flex items-center gap-2">
                     SYSTEM STATUS: <span className="text-blue-200 animate-pulse">OPERATIONAL</span>
                  </div>
+            </div>
+            
+            {/* Watermark */}
+            <div className="mt-6 text-center">
+                <p className="text-[10px] font-mono text-white/20 tracking-wide">
+                    Product by MARESOLIK INC.
+                </p>
             </div>
             
             {/* Big Logo Text */}

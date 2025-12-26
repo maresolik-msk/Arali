@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Sparkles, TrendingUp, Package, Lightbulb, Target, BarChart3, AlertCircle, Loader, Zap, Award, ArrowUp, ArrowDown, Activity } from 'lucide-react';
+import { Sparkles, TrendingUp, Package, Lightbulb, Target, BarChart3, AlertCircle, Loader, Zap, Award, ArrowUp, ArrowDown, Activity, Clock } from 'lucide-react';
 import { analyzePurchasePatterns, AIAnalysis, AnalyticsData } from '../services/ai';
 import { toast } from 'sonner';
+
+import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 export function AIInsights() {
   const [loading, setLoading] = useState(false);
@@ -273,22 +275,38 @@ export function AIInsights() {
                   </div>
                   <h3 className="text-green-700 font-semibold">Action Items</h3>
                 </div>
-                <div className="space-y-2">
-                  {analysis.recommendations.slice(0, 3).map((recommendation, index) => (
+                <div className="space-y-3">
+                  {analysis.recommendations.slice(0, 3).map((recommendation, index) => {
+                    // Try to match with top products if mentioned
+                    const relatedProduct = analyticsData.topProducts.find(p => 
+                      recommendation.toLowerCase().includes(p.name.toLowerCase())
+                    );
+                    
+                    return (
                     <motion.div
                       key={index}
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.6 + index * 0.1 }}
                       whileHover={{ scale: 1.02 }}
-                      className="flex items-start gap-2 p-3 bg-gradient-to-r from-green-50 to-transparent rounded-xl border-l-4 border-green-500"
+                      className="flex items-center gap-4 p-4 bg-gradient-to-r from-green-50 to-transparent rounded-xl border-l-4 border-green-500"
                     >
-                      <div className="w-5 h-5 rounded-full bg-green-500 text-white flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
-                        <ArrowUp className="w-3 h-3" />
-                      </div>
-                      <p className="text-sm text-[#082032] flex-1 leading-relaxed">{recommendation}</p>
+                      {relatedProduct && relatedProduct.imageUrl ? (
+                        <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-green-100 shadow-sm bg-white">
+                          <ImageWithFallback 
+                            src={relatedProduct.imageUrl} 
+                            alt={relatedProduct.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-xs flex-shrink-0">
+                          <ArrowUp className="w-4 h-4" />
+                        </div>
+                      )}
+                      <p className="text-sm text-[#082032] flex-1 leading-relaxed font-medium">{recommendation}</p>
                     </motion.div>
-                  ))}
+                  )})}
                 </div>
               </div>
             </motion.div>
@@ -355,6 +373,71 @@ export function AIInsights() {
                       <p className="text-sm text-[#082032] flex-1 leading-relaxed">{optimization}</p>
                     </motion.div>
                   ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Expiry Actions - High Priority */}
+          {analysis.expiryActions && analysis.expiryActions.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1.0 }}
+              className="mb-4"
+            >
+              <div className="bg-white/80 backdrop-blur-xl border border-orange-500/20 rounded-2xl p-5 shadow-lg">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-400 to-red-600 flex items-center justify-center">
+                    <Clock className="w-4 h-4 text-white" />
+                  </div>
+                  <h3 className="text-orange-700 font-semibold">Expiring Stock Actions</h3>
+                </div>
+                <div className="space-y-3">
+                  {analysis.expiryActions.slice(0, 3).map((action, index) => {
+                    // Find product related to this action
+                    // We look for product names in the action text
+                    const relatedProduct = analyticsData.expiringProducts?.find(p => 
+                      action.toLowerCase().includes(p.name.toLowerCase())
+                    );
+                    
+                    return (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 1.1 + index * 0.1 }}
+                      className="group flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 bg-gradient-to-r from-orange-50 to-transparent rounded-xl border-l-4 border-orange-500 hover:shadow-md transition-all"
+                    >
+                      {relatedProduct && relatedProduct.imageUrl ? (
+                        <div className="relative w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border border-orange-100 shadow-sm bg-white">
+                          <ImageWithFallback 
+                            src={relatedProduct.imageUrl} 
+                            alt={relatedProduct.name}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center text-xl flex-shrink-0">
+                          🏷️
+                        </div>
+                      )}
+                      
+                      <div className="flex-1">
+                        <p className="text-sm text-[#082032] leading-relaxed font-medium">{action}</p>
+                        {relatedProduct && (
+                          <div className="flex items-center gap-2 mt-2">
+                             <span className="text-xs text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full font-medium">
+                               Expires: {new Date(relatedProduct.expiryDate).toLocaleDateString()}
+                             </span>
+                             <span className="text-xs text-gray-500">
+                               Stock: {relatedProduct.stock} units
+                             </span>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )})}
                 </div>
               </div>
             </motion.div>

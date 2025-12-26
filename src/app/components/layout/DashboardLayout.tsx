@@ -17,6 +17,7 @@ import {
   Store,
   Truck,
   Sparkles,
+  ScanLine,
 } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { Button } from '../ui/button';
@@ -24,13 +25,19 @@ import { cn } from '../ui/utils';
 import { Toaster } from '../ui/sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { NotificationCenter } from './NotificationCenter';
-import { notificationsApi } from '../../services/api';
+import { notificationsApi, productsApi } from '../../services/api';
+import { getExpiringProducts } from '../../data/dashboardData';
 
 const navItems = [
   {
     title: 'Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
+  },
+  {
+    title: 'POS',
+    href: '/dashboard/pos',
+    icon: ScanLine,
   },
   {
     title: 'Inventory',
@@ -76,7 +83,7 @@ export function DashboardLayout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
-  const { signOut, isAuthenticated, isLoading } = useAuth();
+  const { signOut, isAuthenticated, isLoading, user } = useAuth();
 
   // Load unread notification count - only after auth is ready
   useEffect(() => {
@@ -86,10 +93,61 @@ export function DashboardLayout() {
     }
 
     loadUnreadCount();
+    checkExpiringProducts();
+    
     // Poll for updates every 60 seconds (increased from 30)
     const interval = setInterval(loadUnreadCount, 60000);
     return () => clearInterval(interval);
   }, [isLoading, isAuthenticated]);
+
+  const checkExpiringProducts = async () => {
+    try {
+      const today = new Date().toDateString();
+      const lastCheck = localStorage.getItem('last_expiry_check');
+      
+      // Only check once per day
+      if (lastCheck === today) return;
+
+      const products = await productsApi.getAll();
+      const expiringProducts = getExpiringProducts(products, 3); // Notify for products expiring within 3 days
+
+      if (expiringProducts.length > 0) {
+        // Create notification
+        const expiringCount = expiringProducts.filter(p => p.status === 'expiring_soon').length;
+        const expiredCount = expiringProducts.filter(p => p.status === 'expired').length;
+        
+        let message = '';
+        if (expiredCount > 0) {
+          message = `${expiredCount} product${expiredCount > 1 ? 's have' : ' has'} expired. `;
+        }
+        if (expiringCount > 0) {
+          message += `${expiringCount} product${expiringCount > 1 ? 's are' : ' is'} expiring soon.`;
+        }
+
+        if (message) {
+          await notificationsApi.create({
+            userId: user?.id || 'unknown',
+            type: 'expiry',
+            title: 'Expiry Alert',
+            message: message,
+            read: false,
+            relatedTo: {
+              type: 'product',
+              id: expiringProducts[0].productId,
+              name: expiringProducts[0].productName
+            }
+          });
+          
+          // Force reload notifications count
+          loadUnreadCount();
+        }
+      }
+      
+      localStorage.setItem('last_expiry_check', today);
+    } catch (error) {
+      console.error('Failed to check expiring products:', error);
+    }
+  };
 
   const loadUnreadCount = async () => {
     try {

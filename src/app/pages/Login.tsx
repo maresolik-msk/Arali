@@ -13,12 +13,13 @@ import { toast } from 'sonner';
 export function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { signIn, signUp, resetPassword, changePassword } = useAuth();
+  const { signIn, signUp, requestPasswordResetOTP, verifyOTPAndResetPassword } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
-  const [isResetPasswordOpen, setIsResetPasswordOpen] = useState(false);
+  const [isOTPVerifyOpen, setIsOTPVerifyOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   
@@ -27,14 +28,6 @@ export function Login() {
     email: '',
     password: '',
   });
-
-  // Check if user is coming from password reset email
-  useEffect(() => {
-    const reset = searchParams.get('reset');
-    if (reset === 'true') {
-      setIsResetPasswordOpen(true);
-    }
-  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,36 +92,25 @@ export function Login() {
     setIsLoading(true);
 
     try {
-      await resetPassword(resetEmail);
-      toast.success('Password reset email sent. Please check your inbox.');
+      await requestPasswordResetOTP(resetEmail);
+      toast.success('Password reset code sent! Check your email for a 6-digit code.');
       setIsForgotPasswordOpen(false);
-      setResetEmail('');
+      setIsOTPVerifyOpen(true);
     } catch (error: any) {
-      // Error logging is handled in auth service, no need to log again
       const errorMessage = error.message || 'Password reset failed';
-      
-      // Provide helpful error messages
-      if (errorMessage.includes('not found') || errorMessage.includes('User not found')) {
-        toast.error('No account found with this email. Please check your email or create a new account.');
-      } else if (errorMessage.includes('Email service not configured') || errorMessage.includes('SMTP')) {
-        toast.error('Password reset is temporarily unavailable. Please contact support or try signing in with your existing password.', {
-          duration: 6000,
-        });
-      } else {
-        toast.error(errorMessage, {
-          duration: 5000,
-        });
-      }
+      toast.error(errorMessage, {
+        duration: 5000,
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  const handleVerifyOTPAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Validation
-    if (!newPassword || !confirmPassword) {
+    if (!otp || !newPassword || !confirmPassword) {
       toast.error('Please fill in all fields');
       return;
     }
@@ -146,20 +128,16 @@ export function Login() {
     setIsLoading(true);
 
     try {
-      console.log('Attempting to change password');
-      await changePassword(newPassword);
-      toast.success('Password changed successfully. Please sign in.');
-      setIsResetPasswordOpen(false);
+      await verifyOTPAndResetPassword(resetEmail, otp, newPassword);
+      toast.success('Password reset successful! You can now sign in with your new password.');
+      setIsOTPVerifyOpen(false);
+      setResetEmail('');
+      setOtp('');
+      setNewPassword('');
+      setConfirmPassword('');
     } catch (error: any) {
-      console.error('Password change error:', error);
-      const errorMessage = error.message || 'Password change failed';
-      
-      // Provide helpful error messages
-      if (errorMessage.includes('Invalid token')) {
-        toast.error('Password reset link is invalid or has expired. Please request a new password reset.');
-      } else {
-        toast.error(errorMessage);
-      }
+      const errorMessage = error.message || 'Password reset failed';
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -279,6 +257,18 @@ export function Login() {
                   </span>
                 )}
               </Button>
+
+              {!isSignUp && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5 mt-3"
+                  onClick={() => setFormData({ ...formData, email: 'demo@arali.com', password: 'demo123' })}
+                  disabled={isLoading}
+                >
+                  Use Demo Account
+                </Button>
+              )}
             </form>
 
             {/* Toggle Sign In/Sign Up */}
@@ -319,21 +309,10 @@ export function Login() {
               Forgot Password
             </DialogTitle>
             <DialogDescription id="forgot-password-description">
-              Enter your email address to receive a password reset link.
+              Enter your email address to receive a 6-digit password reset code.
             </DialogDescription>
           </DialogHeader>
           
-          {/* Info Banner */}
-          <div className="bg-[#0F4C81]/5 border border-[#0F4C81]/20 rounded-lg p-4 flex gap-3">
-            <Info className="w-5 h-5 text-[#0F4C81] flex-shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="text-[#0F4C81] font-medium mb-1">Email Configuration Required</p>
-              <p className="text-muted-foreground text-xs">
-                Password reset requires SMTP email configuration. If you encounter issues, please contact support or continue with your existing password.
-              </p>
-            </div>
-          </div>
-
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="reset-email" className="text-[#0F4C81]">Email</Label>
@@ -349,7 +328,7 @@ export function Login() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                We'll send you a password reset link to your email
+                We'll send you a 6-digit code to reset your password
               </p>
             </div>
 
@@ -378,7 +357,7 @@ export function Login() {
                 ) : (
                   <span className="flex items-center gap-2">
                     <Mail className="w-4 h-4" />
-                    Send Reset Link
+                    Send Code
                   </span>
                 )}
               </Button>
@@ -387,19 +366,34 @@ export function Login() {
         </DialogContent>
       </Dialog>
 
-      {/* Reset Password Dialog */}
-      <Dialog open={isResetPasswordOpen} onOpenChange={setIsResetPasswordOpen}>
-        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="reset-password-description">
+      {/* OTP Verify Dialog */}
+      <Dialog open={isOTPVerifyOpen} onOpenChange={setIsOTPVerifyOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="otp-verify-description">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Lock className="w-5 h-5" />
               Reset Password
             </DialogTitle>
-            <DialogDescription id="reset-password-description">
-              Enter your new password below.
+            <DialogDescription id="otp-verify-description">
+              Enter the 6-digit code sent to {resetEmail}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleResetPassword} className="space-y-4">
+          <form onSubmit={handleVerifyOTPAndReset} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="otp" className="text-[#0F4C81]">OTP</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
+                <Input
+                  id="otp"
+                  type="text"
+                  placeholder="123456"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="newPassword" className="text-[#0F4C81]">New Password</Label>
               <div className="relative">
@@ -438,7 +432,7 @@ export function Login() {
                 type="button"
                 variant="outline"
                 className="flex-1 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
-                onClick={() => setIsResetPasswordOpen(false)}
+                onClick={() => setIsOTPVerifyOpen(false)}
               >
                 Cancel
               </Button>
@@ -450,12 +444,12 @@ export function Login() {
                 {isLoading ? (
                   <span className="flex items-center gap-2">
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Updating...
+                    Verifying...
                   </span>
                 ) : (
                   <span className="flex items-center gap-2">
                     <KeyRound className="w-4 h-4" />
-                    Update Password
+                    Reset Password
                   </span>
                 )}
               </Button>

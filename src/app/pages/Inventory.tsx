@@ -41,6 +41,7 @@ export function Inventory() {
     sellingPrice: '',
     vendorType: '',
     expiryDate: '',
+    batchNumber: '',
     alertEnabled: true,
     threshold: '10',
     imageUrl: '',
@@ -64,6 +65,8 @@ export function Inventory() {
     name: string;
     currentStock: number;
     quantity: string;
+    batchNumber: string;
+    expiryDate: string;
   } | null>(null);
   const [recordingSalesProduct, setRecordingSalesProduct] = useState<{
     id: number;
@@ -420,6 +423,13 @@ export function Inventory() {
         unitsSold: 0, // Initialize with 0
         revenue: 0, // Initialize with 0
         expiryDate: newProduct.expiryDate || undefined, // Optional expiry date
+        batches: newProduct.batchNumber ? [{
+          id: `batch-${Date.now()}`,
+          batchNumber: newProduct.batchNumber,
+          expiryDate: newProduct.expiryDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Default 30 days if not set but batch exists
+          quantity: stockNum,
+          receivedDate: new Date().toISOString(),
+        }] : undefined,
         imageUrl: newProduct.imageUrl || undefined,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -441,6 +451,7 @@ export function Inventory() {
         sellingPrice: '',
         vendorType: '',
         expiryDate: '',
+        batchNumber: '',
         alertEnabled: true,
         threshold: '10',
         imageUrl: '',
@@ -579,6 +590,8 @@ export function Inventory() {
       name: item.name,
       currentStock: item.stock,
       quantity: '',
+      batchNumber: '',
+      expiryDate: '',
     });
     setIsRestockDialogOpen(true);
   };
@@ -601,7 +614,8 @@ export function Inventory() {
 
     try {
       // Restock in backend
-      const updatedProduct = await productsApi.restock(restockingProduct.id, stockNum);
+      // @ts-ignore - API signature will be updated
+      const updatedProduct = await productsApi.restock(restockingProduct.id, stockNum, restockingProduct.batchNumber, restockingProduct.expiryDate);
 
       // Update local state
       setInventoryItems(inventoryItems.map(item => 
@@ -770,6 +784,54 @@ export function Inventory() {
     }
   };
 
+  const handleAutoGenerateImages = async () => {
+    // Find products without images
+    const productsWithoutImages = inventoryItems.filter(p => !p.imageUrl);
+    
+    if (productsWithoutImages.length === 0) {
+      toast.info('All products already have images!');
+      return;
+    }
+
+    setIsGeneratingImage(true);
+    const toastId = 'auto-gen-images';
+    toast.loading(`Generating images for ${productsWithoutImages.length} products... (This may take a moment)`, { id: toastId });
+    
+    let successCount = 0;
+    
+    // Process sequentially to avoid rate limits
+    for (const product of productsWithoutImages) {
+      try {
+        // Update toast to show progress
+        toast.loading(`Generating image for: ${product.name} (${successCount + 1}/${productsWithoutImages.length})`, { id: toastId });
+        
+        const result = await generateProductImage(product.name, undefined, product.category);
+        
+        // Update product in backend
+        await productsApi.update(product.id, {
+          imageUrl: result.imageUrl
+        });
+        
+        // Update local state immediately so user sees progress
+        setInventoryItems(prev => prev.map(p => 
+          p.id === product.id ? { ...p, imageUrl: result.imageUrl } : p
+        ));
+        
+        successCount++;
+      } catch (error) {
+        console.error(`Failed to generate image for ${product.name}:`, error);
+      }
+    }
+    
+    setIsGeneratingImage(false);
+    toast.dismiss(toastId);
+    if (successCount > 0) {
+      toast.success(`Successfully generated images for ${successCount} products!`);
+    } else {
+      toast.error('Failed to generate images. Please try again.');
+    }
+  };
+
   const handleVoiceInput = (transcript: string) => {
     const parsed = parseVoiceCommand(transcript);
     const summary = generateVoiceSummary(parsed);
@@ -857,6 +919,15 @@ export function Inventory() {
               Scan Barcode
             </Button>
             */}
+            <Button 
+              variant="outline"
+              className="border-[#0F4C81] text-[#0F4C81] hover:bg-[#0F4C81]/10 rounded-full shadow-lg hidden md:flex"
+              onClick={handleAutoGenerateImages}
+              disabled={isGeneratingImage}
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              Auto-fill Images
+            </Button>
             <Button 
               className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/20" 
               onClick={() => setIsAddDialogOpen(true)}
@@ -1077,6 +1148,16 @@ export function Inventory() {
                   <option key={cat} value={cat} />
                 ))}
               </datalist>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="batchNumber" className="text-[#0F4C81]">Batch Number (Optional)</Label>
+              <Input 
+                id="batchNumber" 
+                placeholder="e.g., BATCH-001"
+                value={newProduct.batchNumber} 
+                onChange={(e) => setNewProduct({ ...newProduct, batchNumber: e.target.value })} 
+                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="expiryDate" className="text-[#0F4C81]">Expiry Date (Optional)</Label>
@@ -1445,6 +1526,26 @@ export function Inventory() {
               <p className="text-xs text-muted-foreground">
                 💡 Say: "50 units" or "add 20 pieces"
               </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="restockBatchNumber" className="text-[#0F4C81]">Batch Number (Optional)</Label>
+              <Input 
+                id="restockBatchNumber" 
+                placeholder="e.g., BATCH-002"
+                value={restockingProduct?.batchNumber || ''} 
+                onChange={(e) => setRestockingProduct({ ...restockingProduct!, batchNumber: e.target.value })} 
+                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="restockExpiryDate" className="text-[#0F4C81]">Expiry Date (Optional)</Label>
+              <Input 
+                id="restockExpiryDate" 
+                type="date"
+                value={restockingProduct?.expiryDate || ''} 
+                onChange={(e) => setRestockingProduct({ ...restockingProduct!, expiryDate: e.target.value })} 
+                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+              />
             </div>
           </div>
           <div className="flex gap-3 pt-2">

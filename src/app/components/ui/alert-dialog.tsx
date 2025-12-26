@@ -58,7 +58,12 @@ function AlertDialogContent({
           className,
         )}
         {...props}
-      />
+      >
+        {/* Default accessible description to prevent warnings if not provided */}
+        <AlertDialogPrimitive.Description className="sr-only">
+          Alert Dialog
+        </AlertDialogPrimitive.Description>
+      </AlertDialogPrimitive.Content>
     </AlertDialogPortal>
   );
 }

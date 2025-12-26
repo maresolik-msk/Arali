@@ -196,7 +196,7 @@ async function apiRequest<T>(
   try {
     // Create an abort controller for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
     const response = await fetch(url, {
       ...options,
@@ -314,10 +314,10 @@ export const productsApi = {
   },
 
   // Restock product
-  restock: async (id: number, quantity: number): Promise<Product> => {
+  restock: async (id: number, quantity: number, batchNumber?: string, expiryDate?: string): Promise<Product> => {
     const data = await apiRequest<{ product: Product }>(`/products/${id}/restock`, {
       method: 'POST',
-      body: JSON.stringify({ quantity }),
+      body: JSON.stringify({ quantity, batchNumber, expiryDate }),
     });
     return data.product;
   },

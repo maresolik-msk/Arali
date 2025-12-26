@@ -303,3 +303,51 @@ export async function updatePassword(newPassword: string): Promise<void> {
     throw new Error(error.message || 'Failed to update password');
   }
 }
+
+// ========================================
+// OTP-BASED PASSWORD RESET
+// ========================================
+
+// Request password reset OTP (sends 6-digit code via email)
+export async function requestPasswordResetOTP(email: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/auth/request-password-reset`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${publicAnonKey}`,
+    },
+    body: JSON.stringify({ email }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to send password reset code');
+  }
+
+  const data = await response.json();
+  return data;
+}
+
+// Verify OTP and reset password
+export async function verifyOTPAndResetPassword(
+  email: string, 
+  otp: string, 
+  newPassword: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/auth/verify-otp-and-reset`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${publicAnonKey}`,
+    },
+    body: JSON.stringify({ email, otp, newPassword }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to reset password');
+  }
+
+  const data = await response.json();
+  return data;
+}

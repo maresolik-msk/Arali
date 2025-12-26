@@ -174,6 +174,7 @@ export interface AIAnalysis {
   recommendations: string[];
   predictions: string[];
   inventoryOptimization: string[];
+  expiryActions?: string[];
 }
 
 export interface AnalyticsData {
@@ -183,12 +184,24 @@ export interface AnalyticsData {
   totalCustomers: number;
   totalOrders: number;
   lowStockCount: number;
+  expiringCount?: number;
   topProducts: Array<{
+    id: number;
     name: string;
     category: string;
     unitsSold: number;
     revenue: number;
     stock: number;
+    imageUrl?: string;
+  }>;
+  expiringProducts?: Array<{
+    id: number;
+    name: string;
+    expiryDate: string;
+    stock: number;
+    price: number;
+    category: string;
+    imageUrl?: string;
   }>;
   productsByCategory: Record<string, number>;
 }

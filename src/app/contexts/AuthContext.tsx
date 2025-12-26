@@ -1,5 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getCurrentSession, signIn as authSignIn, signUp as authSignUp, signOut as authSignOut, sendPasswordResetEmail, updatePassword, type User, type AuthState } from '../services/auth';
+import { 
+  getCurrentSession, 
+  signIn as authSignIn, 
+  signUp as authSignUp, 
+  signOut as authSignOut, 
+  sendPasswordResetEmail, 
+  updatePassword, 
+  requestPasswordResetOTP as authRequestPasswordResetOTP, 
+  verifyOTPAndResetPassword as authVerifyOTPAndResetPassword, 
+  type User, 
+  type AuthState 
+} from '../services/auth';
 import { supabase } from '../services/supabaseClient';
 import { toast } from 'sonner';
 import { clearTokenCache } from '../services/api';
@@ -10,6 +21,8 @@ interface AuthContextType extends AuthState {
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   changePassword: (newPassword: string) => Promise<void>;
+  requestPasswordResetOTP: (email: string) => Promise<void>;
+  verifyOTPAndResetPassword: (email: string, otp: string, newPassword: string) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -158,6 +171,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const requestPasswordResetOTP = async (email: string) => {
+    try {
+      await authRequestPasswordResetOTP(email);
+    } catch (error) {
+      console.error('Request password reset OTP error:', error);
+      throw error;
+    }
+  };
+
+  const verifyOTPAndResetPassword = async (email: string, otp: string, newPassword: string) => {
+    try {
+      await authVerifyOTPAndResetPassword(email, otp, newPassword);
+    } catch (error) {
+      console.error('Verify OTP and reset password error:', error);
+      throw error;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -170,6 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signOut,
         resetPassword,
         changePassword,
+        requestPasswordResetOTP,
+        verifyOTPAndResetPassword,
       }}
     >
       {children}
@@ -193,6 +226,8 @@ export function useAuth() {
       signOut: async () => { throw new Error('Auth not initialized'); },
       resetPassword: async () => { throw new Error('Auth not initialized'); },
       changePassword: async () => { throw new Error('Auth not initialized'); },
+      requestPasswordResetOTP: async () => { throw new Error('Auth not initialized'); },
+      verifyOTPAndResetPassword: async () => { throw new Error('Auth not initialized'); },
     };
   }
   return context;

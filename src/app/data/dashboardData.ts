@@ -1,5 +1,13 @@
 // Type Definitions for Dashboard Data
 
+export interface Batch {
+  id: string;
+  batchNumber: string;
+  expiryDate: string;
+  quantity: number;
+  receivedDate: string;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -17,6 +25,7 @@ export interface Product {
   unitsSold: number;
   revenue: number;
   expiryDate?: string; // ISO date string format
+  batches?: Batch[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,10 +103,21 @@ export interface LowStockAlert {
   lastRestocked?: Date;
 }
 
+export interface ExpiringProductAlert {
+  id: number;
+  productId: number;
+  productName: string;
+  expiryDate: Date;
+  daysRemaining: number;
+  stock: number;
+  category: string;
+  status: 'expired' | 'expiring_soon';
+}
+
 export interface Notification {
   id: string;
   userId: string;
-  type: 'low_stock' | 'out_of_stock' | 'order_status' | 'new_customer' | 'general';
+  type: 'low_stock' | 'out_of_stock' | 'order_status' | 'new_customer' | 'general' | 'expiry';
   title: string;
   message: string;
   read: boolean;
@@ -517,6 +537,43 @@ export const getLowStockProducts = (products: Product[]): LowStockAlert[] => {
       category: product.category,
       lastRestocked: product.updatedAt,
     }));
+};
+
+export const getExpiringProducts = (products: Product[], daysThreshold: number = 7): ExpiringProductAlert[] => {
+  const now = new Date();
+  // Reset time to start of day for accurate comparison
+  now.setHours(0, 0, 0, 0);
+  
+  const thresholdDate = new Date(now);
+  thresholdDate.setDate(thresholdDate.getDate() + daysThreshold);
+
+  return products
+    .filter(product => {
+      if (!product.expiryDate) return false;
+      const expiry = new Date(product.expiryDate);
+      expiry.setHours(0, 0, 0, 0);
+      return expiry <= thresholdDate && product.stock > 0;
+    })
+    .map(product => {
+      const expiry = new Date(product.expiryDate!);
+      expiry.setHours(0, 0, 0, 0);
+      
+      // Calculate diff in milliseconds then convert to days
+      const diffTime = expiry.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      return {
+        id: product.id,
+        productId: product.id,
+        productName: product.name,
+        expiryDate: expiry,
+        daysRemaining: diffDays,
+        stock: product.stock,
+        category: product.category,
+        status: diffDays < 0 ? 'expired' : 'expiring_soon'
+      };
+    })
+    .sort((a, b) => a.daysRemaining - b.daysRemaining);
 };
 
 export const getTopProductsByRevenue = (products: Product[], limit: number = 4) => {

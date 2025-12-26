@@ -28,6 +28,7 @@ import {
   getLowStockProducts, 
   getTopProductsBySales,
   getRecentOrders,
+  getExpiringProducts,
   initialSalesData
 } from '../data/dashboardData';
 import { Card } from '../components/ui/card';
@@ -105,6 +106,7 @@ export function Dashboard() {
   // Computed data
   const dashboardMetrics = calculateDashboardMetrics(products, orders, customers, revenueSources);
   const lowStockAlerts = getLowStockProducts(products);
+  const expiringProducts = getExpiringProducts(products);
   const topProductsSales = getTopProductsBySales(products, 4);
   const recentOrders = getRecentOrders(orders, 5);
 
@@ -285,54 +287,109 @@ export function Dashboard() {
             </ResponsiveContainer>
           </Card>
 
-          {/* Low Stock Alerts - Takes up 1 column */}
-          <Card className="p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm flex flex-col h-[400px]">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-2">
-                     <div className="p-2 bg-red-50 rounded-lg">
-                        <CircleAlert className="w-5 h-5 text-red-600" />
-                    </div>
-                    <h3 className="font-semibold text-[#0F4C81]">Low Stock</h3>
-                </div>
-               {lowStockAlerts.length > 0 && (
-                <span className="bg-red-100 text-red-600 px-2.5 py-0.5 rounded-full text-xs font-bold">
-                  {lowStockAlerts.length}
-                </span>
-              )}
-            </div>
-            
-            <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-              {lowStockAlerts.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center py-8">
-                  <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mb-4">
-                     <Package className="w-8 h-8 text-green-500" />
+          {/* Low Stock Alerts and Expiring Products - Takes up 1 column */}
+          <div className="flex flex-col gap-6">
+            <Card className="p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm flex flex-col h-[400px]">
+              <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                      <div className="p-2 bg-red-50 rounded-lg">
+                          <CircleAlert className="w-5 h-5 text-red-600" />
+                      </div>
+                      <h3 className="font-semibold text-[#0F4C81]">Low Stock</h3>
                   </div>
-                  <p className="text-gray-900 font-medium">All Stocked Up!</p>
-                  <p className="text-sm text-gray-500 mt-1">Inventory levels are looking good.</p>
-                </div>
-              ) : (
-                lowStockAlerts.map((product) => (
-                  <div key={product.id} className="group flex items-center justify-between p-4 bg-white rounded-xl border border-red-100 hover:border-red-200 hover:shadow-md transition-all">
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-[#0F4C81] mb-1">{product.productName}</p>
-                      <p className="text-xs text-red-600 font-medium">Only {product.currentStock} left</p>
+                {lowStockAlerts.length > 0 && (
+                  <span className="bg-red-100 text-red-600 px-2.5 py-0.5 rounded-full text-xs font-bold">
+                    {lowStockAlerts.length}
+                  </span>
+                )}
+              </div>
+              
+              <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                {lowStockAlerts.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center py-8">
+                    <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mb-4">
+                      <Package className="w-8 h-8 text-green-500" />
                     </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-[#0F4C81] hover:bg-[#0F4C81]/10 hover:text-[#0F4C81]"
-                      onClick={(e) => {
-                          e.stopPropagation();
-                          navigate('/dashboard/inventory');
-                      }}
-                    >
-                      <PackagePlus className="w-4 h-4" />
-                    </Button>
+                    <p className="text-gray-900 font-medium">All Stocked Up!</p>
+                    <p className="text-sm text-gray-500 mt-1">Inventory levels are looking good.</p>
                   </div>
-                ))
-              )}
-            </div>
-          </Card>
+                ) : (
+                  lowStockAlerts.map((product) => (
+                    <div key={product.id} className="group flex items-center justify-between p-4 bg-white rounded-xl border border-red-100 hover:border-red-200 hover:shadow-md transition-all">
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-[#0F4C81] mb-1">{product.productName}</p>
+                        <p className="text-xs text-red-600 font-medium">Only {product.currentStock} left</p>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-[#0F4C81] hover:bg-[#0F4C81]/10 hover:text-[#0F4C81]"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            navigate('/dashboard/inventory');
+                        }}
+                      >
+                        <PackagePlus className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+
+            {/* Expiring Products */}
+            <Card className="p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm flex flex-col h-[400px]">
+              <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                      <div className="p-2 bg-orange-50 rounded-lg">
+                          <CircleAlert className="w-5 h-5 text-orange-600" />
+                      </div>
+                      <h3 className="font-semibold text-[#0F4C81]">Expiring Soon</h3>
+                  </div>
+                {expiringProducts.length > 0 && (
+                  <span className="bg-orange-100 text-orange-600 px-2.5 py-0.5 rounded-full text-xs font-bold">
+                    {expiringProducts.length}
+                  </span>
+                )}
+              </div>
+              
+              <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                {expiringProducts.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center py-8">
+                    <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mb-4">
+                      <Package className="w-8 h-8 text-green-500" />
+                    </div>
+                    <p className="text-gray-900 font-medium">Fresh Stock!</p>
+                    <p className="text-sm text-gray-500 mt-1">No products expiring within 7 days.</p>
+                  </div>
+                ) : (
+                  expiringProducts.map((product) => (
+                    <div key={product.id} className="group flex items-center justify-between p-4 bg-white rounded-xl border border-orange-100 hover:border-orange-200 hover:shadow-md transition-all">
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-[#0F4C81] mb-1">{product.productName}</p>
+                        <p className={`text-xs font-medium ${product.status === 'expired' ? 'text-red-600' : 'text-orange-600'}`}>
+                          {product.status === 'expired' 
+                            ? `Expired ${Math.abs(product.daysRemaining)} days ago` 
+                            : `Expires in ${product.daysRemaining} days`}
+                        </p>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-[#0F4C81] hover:bg-[#0F4C81]/10 hover:text-[#0F4C81]"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/dashboard/inventory/${product.productId}`);
+                        }}
+                      >
+                        <ArrowUp className="w-4 h-4 rotate-45" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </div>
         </div>
 
         {/* Top Products and Recent Orders */}

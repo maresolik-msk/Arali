@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Check, CheckCheck, Trash2, X, AlertTriangle, Package, ShoppingCart, Users, Info } from 'lucide-react';
+import { Bell, Check, CheckCheck, Trash2, X, AlertTriangle, Package, ShoppingCart, Users, Info, Clock } from 'lucide-react';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { motion, AnimatePresence } from 'motion/react';
@@ -85,6 +85,8 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
         return <ShoppingCart className="h-5 w-5 text-blue-500" />;
       case 'new_customer':
         return <Users className="h-5 w-5 text-green-500" />;
+      case 'expiry':
+        return <Clock className="h-5 w-5 text-orange-500" />;
       default:
         return <Info className="h-5 w-5 text-gray-500" />;
     }

@@ -3,6 +3,7 @@ import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as kv from "./kv_store.tsx";
+import { sendWaitlistEmail, sendOTPEmail } from "./emailService.tsx";
 const app = new Hono();
 
 // Initialize Supabase clients
@@ -290,7 +291,7 @@ app.post("/make-server-29b58f9a/products/:id/restock", async (c) => {
     }
 
     const id = parseInt(c.req.param('id'));
-    const { quantity } = await c.req.json();
+    const { quantity, batchNumber, expiryDate } = await c.req.json();
     const products = await kv.get(getUserKey(user.id, 'products'));
     const productsList = Array.isArray(products) ? products : [];
     
@@ -300,9 +301,35 @@ app.post("/make-server-29b58f9a/products/:id/restock", async (c) => {
     }
     
     productsList[index].stock += quantity;
+    
+    // Add batch information if provided
+    if (batchNumber || expiryDate) {
+      if (!productsList[index].batches) {
+        productsList[index].batches = [];
+      }
+      
+      // Check if batch exists
+      const batchIdx = productsList[index].batches.findIndex((b: any) => b.batchNumber === batchNumber);
+      
+      if (batchIdx !== -1 && batchNumber) {
+        // Update existing batch
+        productsList[index].batches[batchIdx].quantity += quantity;
+        if (expiryDate) productsList[index].batches[batchIdx].expiryDate = expiryDate;
+      } else {
+        // Create new batch
+        productsList[index].batches.push({
+          id: `batch-${Date.now()}`,
+          batchNumber: batchNumber || `BATCH-${Date.now()}`,
+          expiryDate: expiryDate || productsList[index].expiryDate,
+          quantity: quantity,
+          receivedDate: new Date().toISOString(),
+        });
+      }
+    }
+    
     await kv.set(getUserKey(user.id, 'products'), productsList);
     
-    console.log('Product restocked:', id, 'Quantity:', quantity, 'for user:', user.email);
+    console.log('Product restocked:', id, 'Quantity:', quantity, 'Batch:', batchNumber, 'for user:', user.email);
     return c.json({ product: productsList[index] });
   } catch (error) {
     console.error("Error restocking product:", error);
@@ -349,6 +376,33 @@ app.post("/make-server-29b58f9a/products/:id/record-sales", async (c) => {
     productsList[index].unitsSold = (productsList[index].unitsSold || 0) + quantitySold;
     productsList[index].revenue = (productsList[index].revenue || 0) + (quantitySold * product.price);
     productsList[index].updatedAt = new Date();
+    
+    // Deduct from batches (FIFO based on expiry date)
+    if (productsList[index].batches && productsList[index].batches.length > 0) {
+      let remainingToSell = quantitySold;
+      
+      // Sort batches by expiryDate (earliest first)
+      // We clone the array to sort it locally for processing order, 
+      // but we need to update the original array objects
+      const sortedBatches = [...productsList[index].batches].sort((a: any, b: any) => {
+        if (!a.expiryDate) return 1;
+        if (!b.expiryDate) return -1;
+        return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+      });
+      
+      for (const batch of sortedBatches) {
+        if (remainingToSell <= 0) break;
+        
+        // Find the actual batch object in the original list
+        const originalBatch = productsList[index].batches.find((b: any) => b.id === batch.id);
+        
+        if (originalBatch && originalBatch.quantity > 0) {
+          const take = Math.min(originalBatch.quantity, remainingToSell);
+          originalBatch.quantity -= take;
+          remainingToSell -= take;
+        }
+      }
+    }
     
     await kv.set(getUserKey(user.id, 'products'), productsList);
     
@@ -702,6 +756,23 @@ app.post("/make-server-29b58f9a/notifications", async (c) => {
     const notificationData = await c.req.json();
     const notifications = await kv.get(getUserKey(user.id, 'notifications'));
     const notificationsList = Array.isArray(notifications) ? notifications : [];
+    
+    // Check for duplicate unread notifications to prevent spam
+    // If there's already an unread notification for this specific product/order, don't create another one
+    if (notificationData.relatedTo && notificationData.relatedTo.id) {
+      const duplicate = notificationsList.find((n: any) => 
+        !n.read && 
+        n.type === notificationData.type && 
+        n.relatedTo && 
+        n.relatedTo.id === notificationData.relatedTo.id &&
+        n.relatedTo.type === notificationData.relatedTo.type
+      );
+      
+      if (duplicate) {
+        console.log('Skipping duplicate notification for:', notificationData.relatedTo.id);
+        return c.json({ notification: duplicate });
+      }
+    }
     
     // Create new notification with unique ID
     const notification = {
@@ -1263,12 +1334,27 @@ app.post("/make-server-29b58f9a/ai/generate-product-image", async (c) => {
     }
     console.log('=== END DEBUG ===');
     
-    if (!openaiApiKey) {
-      return c.json({ error: "OpenAI API key not configured" }, 500);
-    }
-
-    // Create prompt for DALL-E 3
+    // Create prompt
     const prompt = `Professional product photography of ${productName}. ${productDescription || ''}. ${productCategory ? `Category: ${productCategory}.` : ''} High quality, clean white background, studio lighting, commercial product photo, sharp focus, professional e-commerce image.`;
+
+    // Helper to generate with Pollinations (Free fallback)
+    const generateWithPollinations = (promptText: string) => {
+      console.log('Using Pollinations.ai fallback for:', promptText);
+      const encodedPrompt = encodeURIComponent(promptText);
+      // Add random seed to avoid caching
+      const seed = Math.floor(Math.random() * 1000000);
+      return `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${seed}&width=1024&height=1024&model=flux`;
+    };
+
+    if (!openaiApiKey) {
+      console.log('No OpenAI key configured, using Pollinations.ai');
+      return c.json({ 
+        imageUrl: generateWithPollinations(prompt),
+        revisedPrompt: prompt,
+        success: true,
+        isFallback: false
+      });
+    }
 
     console.log('Generating image with DALL-E 3 for:', productName);
 
@@ -1289,25 +1375,22 @@ app.post("/make-server-29b58f9a/ai/generate-product-image", async (c) => {
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      
-      // Handle billing hard limit by returning a fallback image
-      if (errorData.error?.code === 'billing_hard_limit_reached' || errorData.error?.type === 'insufficient_quota') {
-        console.warn('Billing hard limit reached. Using fallback placeholder image.');
-        return c.json({ 
-          imageUrl: 'https://placehold.co/1024x1024/0F4C81/FFFFFF/png?text=AI+Unavailable\n(Billing+Limit)',
-          revisedPrompt: "System: OpenAI billing limit reached. Using placeholder image.",
-          success: true,
-          isFallback: true
-        });
+      try {
+        const errorData = await response.json();
+        console.warn('OpenAI API error:', errorData);
+      } catch (e) {
+        console.warn('OpenAI API error (could not parse body):', response.statusText);
       }
-
-      console.error('DALL-E API error:', errorData);
-
+      
+      // Fallback to Pollinations for ANY OpenAI error (billing, rate limit, etc.)
+      console.log('Falling back to Pollinations.ai...');
+      
       return c.json({ 
-        error: 'Failed to generate image', 
-        details: errorData.error?.message || 'Unknown error' 
-      }, response.status);
+        imageUrl: generateWithPollinations(prompt),
+        revisedPrompt: "Generated via Pollinations.ai (Fallback)",
+        success: true,
+        isFallback: false // User gets a real image, so we count it as success
+      });
     }
 
     const data = await response.json();
@@ -1481,6 +1564,25 @@ app.post("/make-server-29b58f9a/ai/analyze-patterns", async (c) => {
       .sort((a: any, b: any) => (b.unitsSold || 0) - (a.unitsSold || 0))
       .slice(0, 5);
 
+    // Calculate expiring products (within 30 days)
+    const now = new Date();
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(now.getDate() + 30);
+    
+    const expiringProducts = productsList.filter((p: any) => {
+        if (!p.expiryDate) return false;
+        const expiry = new Date(p.expiryDate);
+        return expiry > now && expiry <= thirtyDaysFromNow && p.stock > 0;
+    }).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        expiryDate: p.expiryDate,
+        stock: p.stock,
+        price: p.sellingPrice || p.price,
+        category: p.category,
+        imageUrl: p.imageUrl
+    }));
+
     // Create analysis prompt
     const analyticsData = {
       totalProducts: productsList.length,
@@ -1489,12 +1591,16 @@ app.post("/make-server-29b58f9a/ai/analyze-patterns", async (c) => {
       totalCustomers: customersList.length,
       totalOrders: ordersList.length,
       lowStockCount: lowStockProducts.length,
+      expiringCount: expiringProducts.length,
+      expiringProducts: expiringProducts,
       topProducts: topProducts.map((p: any) => ({
+        id: p.id,
         name: p.name,
         category: p.category,
         unitsSold: p.unitsSold || 0,
         revenue: p.revenue || 0,
-        stock: p.stock
+        stock: p.stock,
+        imageUrl: p.imageUrl
       })),
       productsByCategory: productsList.reduce((acc: any, p: any) => {
         acc[p.category] = (acc[p.category] || 0) + 1;
@@ -1516,7 +1622,7 @@ app.post("/make-server-29b58f9a/ai/analyze-patterns", async (c) => {
         messages: [
           {
             role: 'system',
-            content: 'You are an expert retail business analyst specializing in Indian small retail shops. Analyze sales data and provide actionable insights and recommendations. Focus on: 1) Sales trends, 2) Inventory optimization, 3) Revenue growth opportunities, 4) Customer behavior patterns. Use Indian Rupees (₹) for all monetary values. Provide specific, actionable recommendations.'
+            content: 'You are an expert retail business analyst specializing in Indian small retail shops. Analyze sales data and provide actionable insights and recommendations. Focus on: 1) Sales trends, 2) Inventory optimization, 3) Revenue growth opportunities, 4) Customer behavior patterns, 5) Strategies to clear expiring stock (bundling, discounts, recipes). Use Indian Rupees (₹) for all monetary values. Provide specific, actionable recommendations.'
           },
           {
             role: 'user',
@@ -1529,12 +1635,13 @@ Provide:
 2. Recommendations (3-4 actionable items)
 3. Predicted Trends (2-3 predictions)
 4. Inventory Optimization Suggestions
+5. Expiry Actions (Specific actions to clear expiring stock like "Bundle X with Y" or "Discount Z by 20%")
 
-Format as JSON with keys: insights, recommendations, predictions, inventoryOptimization (each as array of strings)`
+Format as JSON with keys: insights, recommendations, predictions, inventoryOptimization, expiryActions (each as array of strings)`
           }
         ],
         temperature: 0.7,
-        max_tokens: 800,
+        max_tokens: 1000,
       }),
     });
 
@@ -1549,7 +1656,8 @@ Format as JSON with keys: insights, recommendations, predictions, inventoryOptim
             insights: ["AI Analysis unavailable due to billing limits.", "Please check your OpenAI account settings."],
             recommendations: ["Manually review your top selling products.", "Check inventory levels for restocking."],
             predictions: ["Unable to predict trends without AI service."],
-            inventoryOptimization: ["Monitor low stock items manually."]
+            inventoryOptimization: ["Monitor low stock items manually."],
+            expiryActions: ["Check expiry dates manually and discount items expiring soon."]
           },
           analyticsData,
           success: true,
@@ -1590,7 +1698,8 @@ Format as JSON with keys: insights, recommendations, predictions, inventoryOptim
         insights: [analysisText],
         recommendations: [],
         predictions: [],
-        inventoryOptimization: []
+        inventoryOptimization: [],
+        expiryActions: []
       };
     }
 
@@ -1605,6 +1714,219 @@ Format as JSON with keys: insights, recommendations, predictions, inventoryOptim
     console.error("Error analyzing patterns - full error:", error);
     console.error("Error stack:", error instanceof Error ? error.stack : 'No stack trace');
     return c.json({ error: "Failed to analyze patterns", details: String(error) }, 500);
+  }
+});
+
+// ========================================
+// WAITLIST ENDPOINT
+// ========================================
+
+// Join waitlist
+app.post("/make-server-29b58f9a/waitlist", async (c) => {
+  try {
+    const { email } = await c.req.json();
+    
+    // Validate email
+    if (!email || !email.includes('@')) {
+      return c.json({ error: "Valid email is required" }, 400);
+    }
+
+    // Check if email already exists in waitlist
+    const waitlist = await kv.get('waitlist') || [];
+    const emailExists = Array.isArray(waitlist) && waitlist.some((entry: any) => entry.email === email);
+    
+    if (emailExists) {
+      return c.json({ 
+        success: true, 
+        message: "You're already on our waitlist!",
+        alreadyExists: true 
+      });
+    }
+
+    // Add to waitlist
+    const waitlistEntry = {
+      email,
+      joinedAt: new Date().toISOString(),
+      id: `wl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    };
+
+    const updatedWaitlist = Array.isArray(waitlist) ? [...waitlist, waitlistEntry] : [waitlistEntry];
+    await kv.set('waitlist', updatedWaitlist);
+    
+    console.log('New waitlist signup:', email);
+
+    // Send welcome email
+    try {
+      await sendWaitlistEmail(email);
+      console.log('Waitlist confirmation email sent to:', email);
+    } catch (emailError) {
+      console.error('Failed to send waitlist email:', emailError);
+      // Continue even if email fails - don't block waitlist signup
+    }
+    
+    return c.json({ 
+      success: true, 
+      message: "Thank you for joining our waitlist!",
+      entry: waitlistEntry
+    });
+  } catch (error) {
+    console.error("Error adding to waitlist:", error);
+    return c.json({ error: "Failed to join waitlist", details: String(error) }, 500);
+  }
+});
+
+// Get waitlist count (admin endpoint)
+app.get("/make-server-29b58f9a/waitlist/count", async (c) => {
+  try {
+    const waitlist = await kv.get('waitlist') || [];
+    const count = Array.isArray(waitlist) ? waitlist.length : 0;
+    
+    return c.json({ count });
+  } catch (error) {
+    console.error("Error fetching waitlist count:", error);
+    return c.json({ error: "Failed to fetch waitlist count" }, 500);
+  }
+});
+
+// ========================================
+// PASSWORD RESET WITH OTP
+// ========================================
+
+// Request password reset OTP
+app.post("/make-server-29b58f9a/auth/request-password-reset", async (c) => {
+  try {
+    const { email } = await c.req.json();
+    
+    // Validate email
+    if (!email || !email.includes('@')) {
+      return c.json({ error: "Valid email is required" }, 400);
+    }
+
+    // Check if user exists
+    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+    const userExists = existingUsers?.users?.some(user => user.email === email);
+    
+    if (!userExists) {
+      // Don't reveal that user doesn't exist for security
+      return c.json({ 
+        success: true, 
+        message: "If an account exists with this email, you will receive a password reset code." 
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store OTP in KV with expiry (5 minutes)
+    const otpData = {
+      email,
+      otp,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
+      used: false
+    };
+    
+    await kv.set(`password-reset-otp:${email}`, otpData);
+    
+    console.log(`Password reset OTP generated for: ${email}`);
+    
+    // Send OTP email
+    try {
+      await sendOTPEmail(email, otp);
+      console.log(`Password reset OTP email sent to: ${email}`);
+    } catch (emailError) {
+      console.error('Failed to send OTP email:', emailError);
+      return c.json({ 
+        error: "Failed to send password reset email. Please try again or contact support." 
+      }, 500);
+    }
+    
+    return c.json({ 
+      success: true, 
+      message: "Password reset code sent to your email. Please check your inbox." 
+    });
+  } catch (error) {
+    console.error("Error requesting password reset:", error);
+    return c.json({ error: "Failed to request password reset", details: String(error) }, 500);
+  }
+});
+
+// Verify OTP and reset password
+app.post("/make-server-29b58f9a/auth/verify-otp-and-reset", async (c) => {
+  try {
+    const { email, otp, newPassword } = await c.req.json();
+    
+    // Validate inputs
+    if (!email || !otp || !newPassword) {
+      return c.json({ error: "Email, OTP, and new password are required" }, 400);
+    }
+
+    if (newPassword.length < 6) {
+      return c.json({ error: "Password must be at least 6 characters" }, 400);
+    }
+
+    // Get stored OTP
+    const otpData = await kv.get(`password-reset-otp:${email}`);
+    
+    if (!otpData) {
+      return c.json({ error: "Invalid or expired OTP. Please request a new code." }, 400);
+    }
+
+    // Check if OTP has been used
+    if (otpData.used) {
+      return c.json({ error: "This OTP has already been used. Please request a new code." }, 400);
+    }
+
+    // Check if OTP is expired
+    const now = new Date();
+    const expiresAt = new Date(otpData.expiresAt);
+    if (now > expiresAt) {
+      // Clean up expired OTP
+      await kv.del(`password-reset-otp:${email}`);
+      return c.json({ error: "OTP has expired. Please request a new code." }, 400);
+    }
+
+    // Verify OTP matches
+    if (otpData.otp !== otp) {
+      return c.json({ error: "Invalid OTP. Please check the code and try again." }, 400);
+    }
+
+    // Get user
+    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+    const user = existingUsers?.users?.find(u => u.email === email);
+    
+    if (!user) {
+      return c.json({ error: "User not found" }, 404);
+    }
+
+    // Update password
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(
+      user.id,
+      { password: newPassword }
+    );
+
+    if (error) {
+      console.error("Error updating password:", error);
+      return c.json({ error: "Failed to update password" }, 500);
+    }
+
+    // Mark OTP as used
+    await kv.set(`password-reset-otp:${email}`, { ...otpData, used: true });
+    
+    // Clean up OTP after short delay (optional - keeps for audit trail)
+    setTimeout(async () => {
+      await kv.del(`password-reset-otp:${email}`);
+    }, 60000); // Delete after 1 minute
+    
+    console.log(`Password reset successful for: ${email}`);
+    
+    return c.json({ 
+      success: true, 
+      message: "Password reset successful. You can now sign in with your new password." 
+    });
+  } catch (error) {
+    console.error("Error verifying OTP and resetting password:", error);
+    return c.json({ error: "Failed to reset password", details: String(error) }, 500);
   }
 });
 

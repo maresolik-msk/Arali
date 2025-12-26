@@ -12,6 +12,7 @@ import { GetStarted } from './pages/GetStarted';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Inventory } from './pages/Inventory';
+import { POS } from './pages/POS';
 import { Orders } from './pages/Orders';
 import { Customers } from './pages/Customers';
 import { Vendors } from './pages/Vendors';
@@ -112,6 +113,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Dashboard /> },
+      { path: "pos", element: <POS /> },
       { path: "inventory", element: <Inventory /> },
       { path: "inventory/:productId", element: <ProductDetail /> },
       { path: "orders", element: <Orders /> },
