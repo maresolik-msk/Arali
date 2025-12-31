@@ -571,7 +571,8 @@ export function Inventory() {
 
       // Close dialog and reset
       setIsEditDialogOpen(false);
-      setEditingProduct(null);
+      // Don't clear state immediately to prevent controlled/uncontrolled error during exit animation
+      // setEditingProduct(null);
 
       // Show success message
       toast.success('Product updated successfully!');
@@ -624,7 +625,7 @@ export function Inventory() {
 
       // Close dialog and reset
       setIsRestockDialogOpen(false);
-      setRestockingProduct(null);
+      // setRestockingProduct(null);
 
       // Show success message
       toast.success(`Successfully restocked ${stockNum} units!`);
@@ -678,7 +679,7 @@ export function Inventory() {
 
       // Close dialog and reset
       setIsRecordSalesDialogOpen(false);
-      setRecordingSalesProduct(null);
+      // setRecordingSalesProduct(null);
 
       // Calculate revenue for this sale
       const revenue = quantitySold * recordingSalesProduct.price;
@@ -720,7 +721,7 @@ export function Inventory() {
 
       // Close dialog and reset
       setIsDeleteDialogOpen(false);
-      setProductToDelete(null);
+      // setProductToDelete(null);
 
       // Show success message
       toast.success(`Product "${productToDelete.name}" deleted successfully!`);

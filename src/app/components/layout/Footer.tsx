@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { X, Linkedin, Instagram, Facebook } from 'lucide-react';
+import { Twitter, Linkedin, Instagram, Facebook } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { toast } from 'sonner';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
@@ -68,7 +68,7 @@ export function Footer() {
   };
 
   return (
-    <footer className="relative bg-[#0F4C81] text-white pt-32 pb-12 overflow-hidden">
+    <footer className="relative bg-[#0F4C81] text-white pt-32 pb-12 overflow-hidden px-[0px] py-[48px]">
       {/* Background Elements */}
       <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-50" />
       <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 pointer-events-none" />
@@ -150,7 +150,7 @@ export function Footer() {
                             className="p-2 rounded-full border border-white/10 hover:border-white hover:bg-white/10 text-white/40 hover:text-white transition-all"
                             aria-label="Twitter"
                         >
-                            <X className="w-4 h-4" />
+                            <Twitter className="w-4 h-4" />
                         </button>
                         <button 
                             onClick={() => handleSocialClick('linkedin')}
@@ -178,40 +178,66 @@ export function Footer() {
             </div>
         </div>
 
-        {/* Massive Footer Text */}
-        <div className="border-t border-white/10 pt-12 relative">
-            <div className="flex flex-col md:flex-row justify-between items-end gap-6">
-                 <div className="text-xs font-mono text-white/40 flex flex-col md:flex-row gap-4 md:gap-8">
-                    <span>© {currentYear} ARALI INC.</span>
-                    <button 
-                        onClick={() => alert('Privacy Policy - Coming Soon! We respect your privacy and will update our policy here.')}
-                        className="hover:text-white transition-colors text-left"
-                     >
-                        PRIVACY POLICY
-                     </button>
-                     <button 
-                        onClick={() => alert('Terms of Service - Coming Soon! We are working on our terms and will update them here.')}
-                        className="hover:text-white transition-colors text-left"
-                     >
-                        TERMS OF SERVICE
-                     </button>
+        <div className="border-t border-white/[0.05] pt-20 relative overflow-hidden">
+            {/* Top Bar: Legal & Status */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-8 mb-32 md:mb-40 px-6">
+                 <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-3 text-[10px] font-mono tracking-[0.2em] text-white/30 uppercase">
+                        <span className="text-white/60">© {currentYear} MARESOLIK INC.</span>
+                        <span className="w-px h-3 bg-white/10"></span>
+                        <span>Global Retail Solutions</span>
+                    </div>
+                    <div className="flex gap-6 text-[10px] font-mono tracking-[0.2em] text-white/30 uppercase">
+                         <button onClick={() => alert('Privacy Policy - Coming Soon!')} className="hover:text-white transition-colors duration-300">Privacy</button>
+                         <button onClick={() => alert('Terms of Service - Coming Soon!')} className="hover:text-white transition-colors duration-300">Terms</button>
+                    </div>
                  </div>
-                 <div className="text-xs font-mono text-white/40 flex items-center gap-2">
-                    SYSTEM STATUS: <span className="text-blue-200 animate-pulse">OPERATIONAL</span>
+                 
+                 <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-white/[0.03] border border-white/[0.05] backdrop-blur-sm group cursor-default hover:bg-white/[0.05] transition-colors">
+                    <div className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                    </div>
+                    <span className="text-[9px] font-mono text-emerald-400/80 tracking-widest uppercase group-hover:text-emerald-400 transition-colors">All Systems Operational</span>
                  </div>
             </div>
             
-            {/* Watermark */}
-            <div className="mt-6 text-center">
-                <p className="text-[10px] font-mono text-white/20 tracking-wide">
-                    Product by MARESOLIK INC.
-                </p>
+            {/* Massive Brand Footer */}
+            <div className="relative w-full flex justify-center">
+                 <h1 className="text-[28vw] leading-[0.6] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white/[0.02] to-transparent select-none pointer-events-none mix-blend-overlay blur-[1px] transform translate-y-12">
+                    ARALI
+                </h1>
+                
+                {/* The Monolith Watermark */}
+                <div className="absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+                    <div className="group relative">
+                        {/* Vertical tether line */}
+                        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-px h-32 bg-gradient-to-b from-transparent to-white/20 opacity-0 group-hover:opacity-100 transition-all duration-700 ease-out delay-100"></div>
+
+                        <div className="relative bg-[#0F4C81]/30 backdrop-blur-2xl rounded-[2rem] p-1 border border-white/[0.08] shadow-2xl shadow-black/50 transition-all duration-500 hover:border-white/[0.2] hover:bg-[#0F4C81]/40">
+                             <div className="px-12 py-8 rounded-[1.8rem] bg-gradient-to-b from-white/[0.03] to-transparent border border-white/[0.02] flex flex-col items-center gap-4">
+                                <span className="text-[9px] font-mono tracking-[0.5em] text-white/30 uppercase group-hover:text-emerald-400/60 transition-colors duration-500">
+                                    Architected By
+                                </span>
+                                
+                                <div className="relative">
+                                    <span className="text-3xl md:text-5xl font-bold tracking-[0.25em] text-white uppercase drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)]">
+                                        Maresolik
+                                    </span>
+                                    {/* Shine effect */}
+                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out pointer-events-none"></div>
+                                </div>
+                                
+                                <div className="flex items-center gap-4 mt-2">
+                                    <div className="h-px w-8 bg-white/10 group-hover:w-12 transition-all duration-500"></div>
+                                    <span className="text-[8px] font-mono tracking-[0.3em] text-white/20 uppercase">Digital Craftsmanship</span>
+                                    <div className="h-px w-8 bg-white/10 group-hover:w-12 transition-all duration-500"></div>
+                                </div>
+                             </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            
-            {/* Big Logo Text */}
-            <h1 className="text-[18vw] leading-[0.8] font-bold tracking-tighter text-white/[0.03] select-none mt-10 text-center pointer-events-none">
-                ARALI
-            </h1>
         </div>
       </div>
     </footer>

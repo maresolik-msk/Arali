@@ -246,7 +246,7 @@ export function Vendors() {
 
       // Close dialog and reset
       setIsEditDialogOpen(false);
-      setEditingVendor(null);
+      // setEditingVendor(null);
 
       // Show success message
       toast.success('Vendor updated successfully!');
@@ -273,7 +273,7 @@ export function Vendors() {
 
       // Close dialog and reset
       setIsDeleteDialogOpen(false);
-      setVendorToDelete(null);
+      // setVendorToDelete(null);
 
       // Show success message
       toast.success('Vendor deleted successfully!');

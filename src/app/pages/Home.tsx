@@ -139,28 +139,67 @@ export function Home() {
       </section>
 
       {/* 4.3 Arali's Core Solution */}
-      <section className="py-24">
-        <div className="container mx-auto px-6">
-          <motion.div {...fadeInUp} className="mb-16 text-center max-w-2xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-semibold text-[#0F4C81]">Simple steps to better business.</h2>
+      <section className="py-32 bg-white relative overflow-hidden">
+        {/* Background Gradients */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full max-w-7xl pointer-events-none">
+           <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#0F4C81]/5 rounded-full blur-[100px] opacity-60" />
+           <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-[#0F4C81]/5 rounded-full blur-[100px] opacity-60" />
+        </div>
+
+        <div className="container mx-auto px-6 relative z-10">
+          <motion.div {...fadeInUp} className="mb-20 text-center max-w-3xl mx-auto">
+            <span className="inline-block py-1 px-3 rounded-full bg-[#0F4C81]/10 text-[#0F4C81] text-xs font-semibold tracking-wider uppercase mb-6">
+              How it works
+            </span>
+            <h2 className="text-4xl md:text-5xl font-semibold text-[#0F4C81] mb-6 leading-tight">
+              Simple steps.<br/>Better business flow.
+            </h2>
+            <p className="text-xl text-[#082032]/60 leading-relaxed">
+              Managing a shop shouldn't feel like a second job. Arali streamlines your daily operations into three clear actions.
+            </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
             {[
-              { title: "Track", desc: "Log purchases in seconds. No complex forms.", bg: "bg-[#0F4C81]/5", text: "text-[#0F4C81]" },
-              { title: "Watch", desc: "Get quiet alerts before items expire.", bg: "bg-[#0F4C81]/10", text: "text-[#0F4C81]" },
-              { title: "Act", desc: "Discount fast or bundle up. Move stock.", bg: "bg-[#0F4C81]/15", text: "text-[#0F4C81]" }
-            ].map((step, i) => (
+              { 
+                icon: ClipboardList, 
+                step: "01",
+                title: "Track Instantly", 
+                desc: "Log purchases in seconds. No complex forms—just snap, type, and you're done." 
+              },
+              { 
+                icon: Bell, 
+                step: "02",
+                title: "Watch Quietly", 
+                desc: "Get subtle alerts before items expire. We keep an eye on dates so you don't have to." 
+              },
+              { 
+                icon: TrendingDown, 
+                step: "03", 
+                title: "Act Decisively", 
+                desc: "Discount fast to move stock before it spoils. Turn potential losses into cash." 
+              }
+            ].map((item, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: i * 0.1 }}
-                className={`${step.bg} p-10 rounded-3xl flex flex-col items-start justify-between min-h-[240px]`}
+                transition={{ duration: 0.5, delay: i * 0.15 }}
+                className="group relative bg-white p-8 md:p-10 rounded-[2.5rem] border border-[#0F4C81]/10 shadow-lg shadow-[#0F4C81]/5 hover:shadow-2xl hover:shadow-[#0F4C81]/10 transition-all duration-300 hover:-translate-y-2"
               >
-                <h3 className={`text-3xl font-semibold ${step.text} mb-4`}>{step.title}</h3>
-                <p className={`${step.text}/80 text-lg`}>{step.desc}</p>
+                <div className="absolute top-8 right-8 text-7xl font-bold text-[#0F4C81]/5 select-none leading-none">
+                  {item.step}
+                </div>
+                
+                <div className="relative z-10">
+                  <div className="w-16 h-16 rounded-2xl bg-[#0F4C81] text-white flex items-center justify-center mb-8 shadow-lg shadow-[#0F4C81]/20 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
+                    <item.icon size={28} strokeWidth={2} />
+                  </div>
+                  
+                  <h3 className="text-2xl font-bold text-[#0F4C81] mb-4">{item.title}</h3>
+                  <p className="text-[#082032]/70 text-lg leading-relaxed">{item.desc}</p>
+                </div>
               </motion.div>
             ))}
           </div>
@@ -298,29 +337,42 @@ export function Home() {
       {/* 4.7 Who It's For */}
       <section className="py-24 bg-[#EBF4FA]">
          <div className="container mx-auto px-6">
-            <motion.div {...fadeInUp} className="text-center mb-16">
-               <h2 className="text-3xl md:text-4xl font-semibold text-[#0F4C81]">Is Arali right for you?</h2>
+            <motion.div {...fadeInUp} className="text-center mb-16 max-w-2xl mx-auto">
+               <h2 className="text-3xl md:text-4xl font-semibold text-[#0F4C81] mb-6">Honesty first.</h2>
+               <p className="text-xl text-[#082032]/60">
+                 We built Arali for specific needs. We'd rather you not sign up if we're not the right fit.
+               </p>
             </motion.div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto items-center">
                <motion.div 
                  initial={{ opacity: 0, x: -20 }}
                  whileInView={{ opacity: 1, x: 0 }}
                  viewport={{ once: true }}
                  transition={{ duration: 0.6 }}
-                 className="bg-[#F5F9FC] p-10 rounded-3xl border-t-4 border-[#0F4C81]"
+                 className="bg-white p-10 md:p-12 rounded-[2.5rem] shadow-xl shadow-[#0F4C81]/10 border border-[#0F4C81]/10 relative overflow-hidden"
                >
-                  <h3 className="text-xl font-semibold text-[#0F4C81] mb-6">Built for</h3>
-                  <ul className="space-y-4">
+                  <div className="absolute top-0 left-0 w-full h-2 bg-[#0F4C81]"></div>
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="w-12 h-12 rounded-full bg-[#E6F0F9] flex items-center justify-center text-[#0F4C81]">
+                        <Check size={24} strokeWidth={3} />
+                    </div>
+                    <h3 className="text-2xl font-bold text-[#0F4C81]">Perfect for you</h3>
+                  </div>
+                  
+                  <ul className="space-y-6">
                      {[
-                        "Small grocery & retail shops",
-                        "Owners who value peace of mind",
-                        "Shops dealing with perishables",
-                        "People who prefer simple tools"
+                        { title: "Small Shop Owners", desc: "Grocery, retail, or boutique shops." },
+                        { title: "Peace Seekers", desc: "You want to leave work at work." },
+                        { title: "Perishable Goods", desc: "You sell items that expire." },
+                        { title: "Non-Techies", desc: "You prefer pen & paper over Excel." }
                      ].map((item, i) => (
-                        <li key={i} className="flex items-start gap-3 text-[#082032]/80">
-                           <Check className="w-5 h-5 text-[#0F4C81] mt-0.5 shrink-0" />
-                           <span>{item}</span>
+                        <li key={i} className="flex items-start gap-4">
+                           <div className="mt-2 w-1.5 h-1.5 rounded-full bg-[#0F4C81] shrink-0" />
+                           <div>
+                               <span className="block text-[#082032] font-semibold text-lg">{item.title}</span>
+                               <span className="text-[#082032]/60">{item.desc}</span>
+                           </div>
                         </li>
                      ))}
                   </ul>
@@ -331,19 +383,28 @@ export function Home() {
                  whileInView={{ opacity: 1, x: 0 }}
                  viewport={{ once: true }}
                  transition={{ duration: 0.6 }}
-                 className="bg-[#F5F9FC] p-10 rounded-3xl border-t-4 border-[#0F4C81]/20 opacity-80"
+                 className="p-10 md:p-12 rounded-[2.5rem] border-2 border-dashed border-[#0F4C81]/20 opacity-80 hover:opacity-100 transition-opacity"
                >
-                  <h3 className="text-xl font-semibold text-[#082032]/50 mb-6">Not for</h3>
-                  <ul className="space-y-4">
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+                        <X size={24} strokeWidth={3} />
+                    </div>
+                    <h3 className="text-2xl font-bold text-[#082032]/60">Probably not for you</h3>
+                  </div>
+
+                  <ul className="space-y-6">
                      {[
-                        "Big box supermarkets",
-                        "Complex supply chain needs",
-                        "Dropshipping businesses",
-                        "People looking for complex analytics"
+                        { title: "Big Supermarkets", desc: "If you have >10 checkout lanes." },
+                        { title: "Supply Chain Pros", desc: "If you need warehousing logistics." },
+                        { title: "Dropshippers", desc: "We focus on physical, in-store inventory." },
+                        { title: "Data Analysts", desc: "If you need complex pivot tables." }
                      ].map((item, i) => (
-                        <li key={i} className="flex items-start gap-3 text-[#082032]/60">
-                           <X className="w-5 h-5 text-[#082032]/40 mt-0.5 shrink-0" />
-                           <span>{item}</span>
+                        <li key={i} className="flex items-start gap-4 text-[#082032]/50">
+                           <div className="mt-2 w-1.5 h-1.5 rounded-full bg-[#082032]/20 shrink-0" />
+                           <div>
+                               <span className="block text-[#082032]/70 font-semibold text-lg">{item.title}</span>
+                               <span className="">{item.desc}</span>
+                           </div>
                         </li>
                      ))}
                   </ul>
