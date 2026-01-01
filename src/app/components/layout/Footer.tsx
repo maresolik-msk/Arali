@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Twitter, Linkedin, Instagram, Facebook } from 'lucide-react';
+import { X as XIcon, Linkedin, Instagram, Facebook } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { toast } from 'sonner';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
@@ -150,7 +150,7 @@ export function Footer() {
                             className="p-2 rounded-full border border-white/10 hover:border-white hover:bg-white/10 text-white/40 hover:text-white transition-all"
                             aria-label="Twitter"
                         >
-                            <Twitter className="w-4 h-4" />
+                            <XIcon className="w-4 h-4" />
                         </button>
                         <button 
                             onClick={() => handleSocialClick('linkedin')}
