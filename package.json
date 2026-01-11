@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "clean": "rm -rf dist .vite node_modules/.vite",
+    "rebuild": "rm -rf dist .vite node_modules/.vite && vite build",
     "dev": "vite"
   },
   "dependencies": {

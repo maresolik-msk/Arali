@@ -11,7 +11,8 @@
 > Featuring Digital Craftsmanship design, glassmorphic UI, and comprehensive business tools
 
 **📖 New? Start here:** [GETTING_STARTED.md](./GETTING_STARTED.md)  
-**📚 All Documentation:** [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md)
+**📚 All Documentation:** [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md)  
+**🚀 Deploy Now:** [DEPLOY_NOW.md](./DEPLOY_NOW.md)
 
 ---
 
