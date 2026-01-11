@@ -258,17 +258,7 @@ export function Login() {
                 )}
               </Button>
 
-              {!isSignUp && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5 mt-3"
-                  onClick={() => setFormData({ ...formData, email: 'demo@arali.com', password: 'demo123' })}
-                  disabled={isLoading}
-                >
-                  Use Demo Account
-                </Button>
-              )}
+
             </form>
 
             {/* Toggle Sign In/Sign Up */}

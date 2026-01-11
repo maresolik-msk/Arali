@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arali PWA Testing Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #0F4C81 0%, #082032 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 32px;
+      margin-bottom: 10px;
+      letter-spacing: -0.5px;
+    }
+
+    .header p {
+      opacity: 0.9;
+      font-size: 14px;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(20px);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .card h2 {
+      color: #0F4C81;
+      font-size: 18px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .status-label {
+      color: #555;
+      font-weight: 500;
+    }
+
+    .status-value {
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+    }
+
+    .status-success {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .status-warning {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status-neutral {
+      background: #e2e3e5;
+      color: #383d41;
+    }
+
+    button {
+      width: 100%;
+      background: #0F4C81;
+      color: white;
+      border: none;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 12px;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background: #0d3d6a;
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button.secondary {
+      background: white;
+      color: #0F4C81;
+      border: 2px solid #0F4C81;
+    }
+
+    button.danger {
+      background: #dc3545;
+    }
+
+    button.danger:hover {
+      background: #c82333;
+    }
+
+    .log {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .log-entry {
+      margin-bottom: 4px;
+      color: #333;
+    }
+
+    .log-success { color: #28a745; }
+    .log-error { color: #dc3545; }
+    .log-info { color: #17a2b8; }
+
+    .icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .spinning {
+      animation: spin 1s linear infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🧪 Arali PWA Testing Dashboard</h1>
+      <p>Test and monitor your Progressive Web App</p>
+    </div>
+
+    <div class="dashboard">
+      <!-- Installation Status -->
+      <div class="card">
+        <h2>📱 Installation</h2>
+        <div class="status-item">
+          <span class="status-label">Display Mode</span>
+          <span class="status-value status-neutral" id="displayMode">Checking...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Platform</span>
+          <span class="status-value status-neutral" id="platform">Checking...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Can Install</span>
+          <span class="status-value status-neutral" id="canInstall">Checking...</span>
+        </div>
+        <button id="installBtn" style="display: none;">Install App</button>
+      </div>
+
+      <!-- Service Worker Status -->
+      <div class="card">
+        <h2>⚙️ Service Worker</h2>
+        <div class="status-item">
+          <span class="status-label">Status</span>
+          <span class="status-value status-neutral" id="swStatus">Checking...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Scope</span>
+          <span class="status-value status-neutral" id="swScope">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Caches</span>
+          <span class="status-value status-neutral" id="cacheCount">-</span>
+        </div>
+        <button onclick="checkServiceWorker()">Refresh Status</button>
+        <button class="secondary" onclick="updateServiceWorker()">Check for Updates</button>
+      </div>
+
+      <!-- Network Status -->
+      <div class="card">
+        <h2>🌐 Network</h2>
+        <div class="status-item">
+          <span class="status-label">Connection</span>
+          <span class="status-value status-neutral" id="networkStatus">Checking...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Type</span>
+          <span class="status-value status-neutral" id="connectionType">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Effective Speed</span>
+          <span class="status-value status-neutral" id="effectiveType">-</span>
+        </div>
+        <button onclick="testOffline()">Test Offline Mode</button>
+      </div>
+
+      <!-- Manifest Status -->
+      <div class="card">
+        <h2>📄 Manifest</h2>
+        <div class="status-item">
+          <span class="status-label">Loaded</span>
+          <span class="status-value status-neutral" id="manifestStatus">Checking...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Name</span>
+          <span class="status-value status-neutral" id="manifestName">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Icons</span>
+          <span class="status-value status-neutral" id="manifestIcons">-</span>
+        </div>
+        <button onclick="checkManifest()">Validate Manifest</button>
+      </div>
+
+      <!-- Notifications -->
+      <div class="card">
+        <h2>🔔 Notifications</h2>
+        <div class="status-item">
+          <span class="status-label">Permission</span>
+          <span class="status-value status-neutral" id="notifPermission">Checking...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Supported</span>
+          <span class="status-value status-neutral" id="notifSupported">-</span>
+        </div>
+        <button onclick="requestNotification()">Request Permission</button>
+        <button class="secondary" onclick="sendTestNotification()">Send Test</button>
+      </div>
+
+      <!-- Cache Management -->
+      <div class="card">
+        <h2>💾 Cache Storage</h2>
+        <div class="status-item">
+          <span class="status-label">Total Size</span>
+          <span class="status-value status-neutral" id="cacheSize">Calculating...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Quota Used</span>
+          <span class="status-value status-neutral" id="quotaUsed">-</span>
+        </div>
+        <button onclick="calculateCacheSize()">Recalculate Size</button>
+        <button class="danger" onclick="clearAllCaches()">Clear All Caches</button>
+      </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="card" style="margin-top: 20px;">
+      <h2>📋 Activity Log</h2>
+      <div class="log" id="activityLog"></div>
+      <button class="secondary" onclick="clearLog()">Clear Log</button>
+    </div>
+  </div>
+
+  <script>
+    let deferredPrompt = null;
+    const log = [];
+
+    function addLog(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const entry = `[${timestamp}] ${message}`;
+      log.push({ entry, type });
+      
+      const logDiv = document.getElementById('activityLog');
+      const logEntry = document.createElement('div');
+      logEntry.className = `log-entry log-${type}`;
+      logEntry.textContent = entry;
+      logDiv.insertBefore(logEntry, logDiv.firstChild);
+    }
+
+    function clearLog() {
+      document.getElementById('activityLog').innerHTML = '';
+      log.length = 0;
+    }
+
+    // Check display mode
+    function checkDisplayMode() {
+      const standalone = window.matchMedia('(display-mode: standalone)').matches;
+      const fullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
+      const minimalUi = window.matchMedia('(display-mode: minimal-ui)').matches;
+      
+      let mode = 'browser';
+      let statusClass = 'status-neutral';
+      
+      if (standalone) {
+        mode = 'standalone';
+        statusClass = 'status-success';
+        addLog('Running as installed PWA', 'success');
+      } else if (fullscreen) {
+        mode = 'fullscreen';
+        statusClass = 'status-success';
+      } else if (minimalUi) {
+        mode = 'minimal-ui';
+        statusClass = 'status-warning';
+      }
+      
+      document.getElementById('displayMode').textContent = mode;
+      document.getElementById('displayMode').className = `status-value ${statusClass}`;
+    }
+
+    // Check platform
+    function checkPlatform() {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isAndroid = /Android/.test(navigator.userAgent);
+      
+      let platform = 'Desktop';
+      if (isIOS) platform = 'iOS';
+      if (isAndroid) platform = 'Android';
+      
+      document.getElementById('platform').textContent = platform;
+      addLog(`Platform detected: ${platform}`, 'info');
+    }
+
+    // Check service worker
+    async function checkServiceWorker() {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        
+        if (reg) {
+          const state = reg.active?.state || 'installing';
+          document.getElementById('swStatus').textContent = state;
+          document.getElementById('swStatus').className = `status-value ${state === 'activated' ? 'status-success' : 'status-warning'}`;
+          document.getElementById('swScope').textContent = new URL(reg.scope).pathname;
+          addLog(`Service Worker: ${state}`, state === 'activated' ? 'success' : 'info');
+        } else {
+          document.getElementById('swStatus').textContent = 'Not registered';
+          document.getElementById('swStatus').className = 'status-value status-error';
+          addLog('Service Worker not registered', 'error');
+        }
+
+        // Check caches
+        const cacheNames = await caches.keys();
+        document.getElementById('cacheCount').textContent = cacheNames.length;
+      }
+    }
+
+    // Update service worker
+    async function updateServiceWorker() {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        await reg.update();
+        addLog('Checking for service worker updates...', 'info');
+        if (reg.waiting) {
+          addLog('Update available! Reload to apply.', 'success');
+          if (confirm('New version available! Reload now?')) {
+            window.location.reload();
+          }
+        } else {
+          addLog('You\'re running the latest version', 'success');
+          alert('✅ You\'re running the latest version!');
+        }
+      }
+    }
+
+    // Check manifest
+    async function checkManifest() {
+      const manifestLink = document.querySelector('link[rel="manifest"]');
+      
+      if (manifestLink) {
+        try {
+          const response = await fetch(manifestLink.href);
+          const manifest = await response.json();
+          
+          document.getElementById('manifestStatus').textContent = 'Loaded';
+          document.getElementById('manifestStatus').className = 'status-value status-success';
+          document.getElementById('manifestName').textContent = manifest.short_name || manifest.name;
+          document.getElementById('manifestIcons').textContent = manifest.icons?.length || 0;
+          
+          addLog(`Manifest loaded: ${manifest.name}`, 'success');
+        } catch (error) {
+          document.getElementById('manifestStatus').textContent = 'Error';
+          document.getElementById('manifestStatus').className = 'status-value status-error';
+          addLog(`Manifest error: ${error.message}`, 'error');
+        }
+      } else {
+        addLog('Manifest not found in HTML', 'error');
+      }
+    }
+
+    // Check network
+    function checkNetwork() {
+      const online = navigator.onLine;
+      document.getElementById('networkStatus').textContent = online ? 'Online' : 'Offline';
+      document.getElementById('networkStatus').className = `status-value ${online ? 'status-success' : 'status-error'}`;
+      
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (conn) {
+        document.getElementById('connectionType').textContent = conn.type || 'unknown';
+        document.getElementById('effectiveType').textContent = conn.effectiveType || 'unknown';
+      }
+    }
+
+    // Test offline
+    function testOffline() {
+      addLog('To test offline mode:', 'info');
+      addLog('1. Open DevTools (F12)', 'info');
+      addLog('2. Go to Application > Service Workers', 'info');
+      addLog('3. Check "Offline" checkbox', 'info');
+      addLog('4. Reload page - should still work!', 'info');
+      alert('See activity log for offline testing instructions');
+    }
+
+    // Calculate cache size
+    async function calculateCacheSize() {
+      if ('storage' in navigator && 'estimate' in navigator.storage) {
+        const estimate = await navigator.storage.estimate();
+        const usedMB = (estimate.usage / (1024 * 1024)).toFixed(2);
+        const quotaMB = (estimate.quota / (1024 * 1024)).toFixed(2);
+        const percentUsed = ((estimate.usage / estimate.quota) * 100).toFixed(1);
+        
+        document.getElementById('cacheSize').textContent = `${usedMB} MB`;
+        document.getElementById('quotaUsed').textContent = `${percentUsed}%`;
+        
+        addLog(`Cache size: ${usedMB} MB (${percentUsed}% of ${quotaMB} MB quota)`, 'info');
+      }
+    }
+
+    // Clear caches
+    async function clearAllCaches() {
+      if (confirm('⚠️ This will clear all cached data. Continue?')) {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map(name => caches.delete(name)));
+        addLog(`Cleared ${cacheNames.length} cache(s)`, 'success');
+        alert('✅ All caches cleared! Reload the page.');
+        await calculateCacheSize();
+      }
+    }
+
+    // Notifications
+    function checkNotifications() {
+      if ('Notification' in window) {
+        document.getElementById('notifSupported').textContent = 'Yes';
+        document.getElementById('notifPermission').textContent = Notification.permission;
+        document.getElementById('notifPermission').className = `status-value ${
+          Notification.permission === 'granted' ? 'status-success' :
+          Notification.permission === 'denied' ? 'status-error' :
+          'status-warning'
+        }`;
+      } else {
+        document.getElementById('notifSupported').textContent = 'No';
+        document.getElementById('notifSupported').className = 'status-value status-error';
+      }
+    }
+
+    async function requestNotification() {
+      if ('Notification' in window) {
+        const permission = await Notification.requestPermission();
+        checkNotifications();
+        addLog(`Notification permission: ${permission}`, permission === 'granted' ? 'success' : 'error');
+      }
+    }
+
+    async function sendTestNotification() {
+      if (Notification.permission === 'granted') {
+        new Notification('Arali PWA Test', {
+          body: 'Your notifications are working perfectly! 🎉',
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-96x96.png'
+        });
+        addLog('Test notification sent', 'success');
+      } else {
+        alert('Please grant notification permission first');
+      }
+    }
+
+    // Install prompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      document.getElementById('canInstall').textContent = 'Yes';
+      document.getElementById('canInstall').className = 'status-value status-success';
+      document.getElementById('installBtn').style.display = 'block';
+      addLog('Install prompt available', 'success');
+    });
+
+    document.getElementById('installBtn')?.addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        addLog(`Install prompt: ${outcome}`, outcome === 'accepted' ? 'success' : 'info');
+        deferredPrompt = null;
+        document.getElementById('installBtn').style.display = 'none';
+      }
+    });
+
+    // Network event listeners
+    window.addEventListener('online', () => {
+      checkNetwork();
+      addLog('Network: Online', 'success');
+    });
+
+    window.addEventListener('offline', () => {
+      checkNetwork();
+      addLog('Network: Offline', 'error');
+    });
+
+    // Initialize
+    addLog('PWA Testing Dashboard loaded', 'success');
+    checkDisplayMode();
+    checkPlatform();
+    checkServiceWorker();
+    checkManifest();
+    checkNetwork();
+    checkNotifications();
+    calculateCacheSize();
+
+    // Auto-update every 5 seconds
+    setInterval(() => {
+      checkNetwork();
+    }, 5000);
+  </script>
+</body>
+</html>

@@ -59,7 +59,7 @@ export function Header() {
                 variant="outline"
                 className="h-11 px-6 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5 rounded-full transition-all duration-300"
               >
-                Dashboard
+                Login
               </Button>
             </Link>
             <Link to="/get-started">

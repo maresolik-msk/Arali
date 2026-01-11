@@ -22,9 +22,13 @@ import { AIInsights } from './pages/AIInsights';
 import { ProductDetail } from './pages/ProductDetail';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from 'sonner';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt';
+import { OfflineIndicator } from './components/OfflineIndicator';
 
-// Arali - Premium Retail Management App v2.3 - Fixed Router and Supabase Client
-// Last updated: December 21, 2024
+// Arali - Premium Retail Management PWA v3.0
+// Progressive Web App with offline support, installable on iOS/Android/Desktop
+// Built with Digital Craftsmanship | MARESOLIK INC
+// Last updated: January 11, 2026
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -131,6 +135,8 @@ export default function App() {
     <AuthProvider>
       <RouterProvider router={router} />
       <Toaster />
+      <PWAInstallPrompt />
+      <OfflineIndicator />
     </AuthProvider>
   );
 }

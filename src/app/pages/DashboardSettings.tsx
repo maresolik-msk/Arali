@@ -6,6 +6,7 @@ import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { shopSettingsApi, type ShopSettings } from '../services/api';
 import { toast } from 'sonner';
+import { PWAStatus } from '../components/PWAStatus';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -238,6 +239,9 @@ export function DashboardSettings() {
               </div>
             </div>
           </Card>
+
+          {/* PWA Status */}
+          <PWAStatus />
         </div>
       </motion.div>
     </div>
