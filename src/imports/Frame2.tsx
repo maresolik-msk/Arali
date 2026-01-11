@@ -1,4 +1,5 @@
-import imgImage1 from "figma:asset/18cf32dc4edc4f7ccc61c9bea27f743107dbf224.png";
+// Milk product image from Unsplash
+const imgImage1 = "https://images.unsplash.com/photo-1635436338433-89747d0ca0ef?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaWxrJTIwYm90dGxlJTIwZGFpcnl8ZW58MXx8fHwxNzY4MDYyNzY2fDA&ixlib=rb-4.1.0&q=80&w=1080";
 
 export default function Frame() {
   return (

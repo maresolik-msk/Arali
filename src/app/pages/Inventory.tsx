@@ -15,8 +15,10 @@ import { lookupProductByBarcode } from '../services/productLookup';
 import { parseVoiceCommand, generateVoiceSummary } from '../services/voiceParser';
 import { BarcodeScanner } from '../components/BarcodeScanner';
 import { VoiceInput } from '../components/VoiceInput';
-import imgMilk from "figma:asset/18cf32dc4edc4f7ccc61c9bea27f743107dbf224.png";
 import type { Product, Vendor } from '../data/dashboardData';
+
+// Milk product image from Unsplash
+const MILK_IMAGE_URL = "https://images.unsplash.com/photo-1635436338433-89747d0ca0ef?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaWxrJTIwYm90dGxlJTIwZGFpcnl8ZW58MXx8fHwxNzY4MDYyNzY2fDA&ixlib=rb-4.1.0&q=80&w=1080";
 
 export function Inventory() {
   const navigate = useNavigate();
@@ -341,7 +343,7 @@ export function Inventory() {
 
       // Special case for "milk" to use the specific provided asset
       if (product.name.trim().toLowerCase() === 'milk') {
-        imageUrl = imgMilk;
+        imageUrl = MILK_IMAGE_URL;
         isFallback = false; // It's a specific asset, not a generic fallback
       } else {
         const result = await generateProductImage(product.name, undefined, product.category);
