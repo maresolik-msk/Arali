@@ -1,97 +1,107 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  IndianRupee, 
-  ShoppingCart, 
+  Plus, 
+  TrendingUp, 
+  AlertTriangle, 
   Package, 
+  ShoppingCart, 
   Users, 
-  TrendingUp,
-  Plus,
-  ArrowUp,
-  ArrowDown,
-  ChartLine,
-  CircleAlert,
-  PackagePlus
+  ChevronRight, 
+  Clock, 
+  ArrowUpRight,
+  Store,
+  ScanLine,
+  Search,
+  ClipboardList
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { 
   productsApi, 
-  customersApi, 
   ordersApi,
-  revenueSourcesApi
+  dashboardApi,
+  DailyMission,
+  StoreHealth,
+  EndOfDaySummary as SummaryType
 } from '../services/api';
-import type { Product, Customer, Order, RevenueSource } from '../data/dashboardData';
+import type { Product, Order } from '../data/dashboardData';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  calculateDashboardMetrics, 
   getLowStockProducts, 
-  getTopProductsBySales,
-  getRecentOrders,
-  getExpiringProducts,
-  initialSalesData
+  getExpiringProducts, 
+  calculateRevenueAtRisk,
+  generatePriorityCards,
+  PriorityCardData
 } from '../data/dashboardData';
-import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { RevenueAnalysisDialog } from '../components/dashboard/RevenueAnalysisDialog';
+import { PriorityActionStack } from '../components/dashboard/PriorityActionStack';
+import { DailyMissionCard } from '../components/dashboard/DailyMissionCard';
+import { StoreHealthWidget } from '../components/dashboard/StoreHealthWidget';
+import { EndOfDaySummary } from '../components/dashboard/EndOfDaySummary';
+import { AICopilot } from '../components/dashboard/AICopilot';
+import { cn } from '../components/ui/utils';
 
 export function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  
+  // State
   const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [revenueSources, setRevenueSources] = useState<RevenueSource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRevenueDialogOpen, setIsRevenueDialogOpen] = useState(false);
+  
+  // Computed State
+  const [priorityCards, setPriorityCards] = useState<PriorityCardData[]>([]);
+  const [revenueAtRisk, setRevenueAtRisk] = useState(0);
+  const [stockoutRiskCount, setStockoutRiskCount] = useState(0);
+  const [expiringCount, setExpiringCount] = useState(0);
 
-  // Load data from backend on mount
+  // New Dashboard Features State
+  const [missions, setMissions] = useState<DailyMission[]>([]);
+  const [storeHealth, setStoreHealth] = useState<StoreHealth | null>(null);
+  const [eodSummary, setEodSummary] = useState<SummaryType | null>(null);
+
+  // Load data
   useEffect(() => {
-    let isMounted = true; // Cleanup flag
-    
-    loadDashboardData();
-    
-    return () => {
-      isMounted = false; // Cleanup on unmount
-    };
+    let isMounted = true;
     
     async function loadDashboardData() {
       try {
         setIsLoading(true);
-        console.log('Loading dashboard data from backend...');
-
-        // Fetch all data in parallel
-        const [productsData, customersData, ordersData, revenueSourcesData] = await Promise.all([
+        // Fetch core data needed for decisions
+        const [productsData, ordersData, missionsData, healthData, summaryData] = await Promise.all([
           productsApi.getAll(),
-          customersApi.getAll(),
           ordersApi.getAll(),
-          revenueSourcesApi.getAll(),
+          dashboardApi.getDailyMissions(),
+          dashboardApi.getStoreHealth(),
+          dashboardApi.getEndOfDaySummary()
         ]);
 
         if (isMounted) {
           setProducts(productsData);
-          setCustomers(customersData);
           setOrders(ordersData);
-          setRevenueSources(revenueSourcesData);
+          setMissions(missionsData);
+          setStoreHealth(healthData);
+          setEodSummary(summaryData);
 
-          const totalItems = productsData.length + customersData.length + ordersData.length;
+          // Calculate AI-driven metrics (Legacy Priority Cards)
+          const cards = generatePriorityCards(productsData);
+          setPriorityCards(cards);
           
-          if (totalItems === 0) {
-            toast.success('Welcome! Start by adding your first product to get started.');
-          }
+          const riskValue = calculateRevenueAtRisk(productsData);
+          setRevenueAtRisk(riskValue);
+          
+          const lowStock = getLowStockProducts(productsData);
+          setStockoutRiskCount(lowStock.length);
+          
+          const expiring = getExpiringProducts(productsData, 7);
+          setExpiringCount(expiring.length);
         }
       } catch (error) {
         console.error('Error loading dashboard data:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        
         if (isMounted) {
-          toast.error(`Failed to load dashboard data: ${errorMessage}`);
-          
-          setProducts([]);
-          setCustomers([]);
-          setOrders([]);
-          setRevenueSources([]);
+          toast.error('Failed to sync with Arali Brain.');
         }
       } finally {
         if (isMounted) {
@@ -99,397 +109,340 @@ export function Dashboard() {
         }
       }
     }
+    
+    loadDashboardData();
+    
+    return () => { isMounted = false; };
   }, []);
 
+  const handlePriorityAction = (id: string) => {
+    if (id.startsWith('stock')) {
+      navigate('/dashboard/inventory');
+    } else if (id.startsWith('expiry')) {
+      navigate('/dashboard/inventory');
+    } else if (id.startsWith('opp')) {
+      navigate('/dashboard/orders');
+    }
+    
+    setPriorityCards(prev => prev.filter(card => card.id !== id));
+    toast.success('Action initiated successfully');
+  };
 
+  const handleDismiss = (id: string) => {
+    setPriorityCards(prev => prev.filter(card => card.id !== id));
+    toast('Recommendation dismissed');
+  };
 
-  // Computed data
-  const dashboardMetrics = calculateDashboardMetrics(products, orders, customers, revenueSources);
-  const lowStockAlerts = getLowStockProducts(products);
-  const expiringProducts = getExpiringProducts(products);
-  const topProductsSales = getTopProductsBySales(products, 4);
-  const recentOrders = getRecentOrders(orders, 5);
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  };
 
-  // Metric cards data
-  const metricCards = [
-    {
-      title: 'Total Revenue',
-      value: `₹${(dashboardMetrics.totalRevenue || 0).toLocaleString('en-IN')}`,
-      change: `${dashboardMetrics.revenueTrend === 'up' ? '+' : '-'}${dashboardMetrics.revenueChange || 0}%`,
-      trend: dashboardMetrics.revenueTrend,
-      icon: IndianRupee,
-    },
-    {
-      title: 'Orders',
-      value: (dashboardMetrics.totalOrders || 0).toLocaleString('en-IN'),
-      change: `${dashboardMetrics.ordersTrend === 'up' ? '+' : '-'}${dashboardMetrics.ordersChange || 0}%`,
-      trend: dashboardMetrics.ordersTrend,
-      icon: ShoppingCart,
-    },
-    {
-      title: 'Products',
-      value: (dashboardMetrics.totalProducts || 0).toLocaleString('en-IN'),
-      change: `${dashboardMetrics.productsTrend === 'up' ? '+' : '-'}${dashboardMetrics.productsChange || 0}%`,
-      trend: dashboardMetrics.productsTrend,
-      icon: Package,
-    },
-    {
-      title: 'Customers',
-      value: (dashboardMetrics.totalCustomers || 0).toLocaleString('en-IN'),
-      change: `${dashboardMetrics.customersTrend === 'up' ? '+' : '-'}${dashboardMetrics.customersChange || 0}%`,
-      trend: dashboardMetrics.customersTrend,
-      icon: Users,
-    },
-  ];
+  // Dynamic Quick Actions Logic
+  const getDynamicQuickActions = () => {
+    const hour = new Date().getHours();
+    const actions = [];
+
+    // Always include POS (Core Action)
+    actions.push({
+      title: "New Sale",
+      desc: "Open POS",
+      icon: <ScanLine size={28} className="mb-4" />,
+      bgIcon: <ScanLine size={64} />,
+      onClick: () => navigate('/dashboard/pos'),
+      variant: 'primary'
+    });
+
+    // Time-based & Context-based Actions
+    if (hour < 11) {
+      // Morning: Check stock & prepare
+      if (stockoutRiskCount > 0) {
+        actions.push({
+          title: "Restock",
+          desc: `${stockoutRiskCount} Low Items`,
+          icon: <Plus size={24} />,
+          onClick: () => navigate('/dashboard/inventory?filter=low_stock'),
+          variant: 'secondary'
+        });
+      } else {
+        actions.push({
+          title: "Add Stock",
+          desc: "Update inventory",
+          icon: <Plus size={24} />,
+          onClick: () => navigate('/dashboard/inventory?action=add'),
+          variant: 'secondary'
+        });
+      }
+    } else if (hour > 18) {
+      // Evening: Review orders & customers
+      actions.push({
+        title: "Daily Summary",
+        desc: "View Report",
+        icon: <ClipboardList size={24} />,
+        onClick: () => navigate('/dashboard/analytics'),
+        variant: 'secondary'
+      });
+    } else {
+      // Mid-day: Operations
+      actions.push({
+        title: "Orders",
+        desc: "View history",
+        icon: <ShoppingCart size={24} />,
+        onClick: () => navigate('/dashboard/orders'),
+        variant: 'secondary'
+      });
+    }
+
+    // Smart Notepad (Always useful)
+    actions.push({
+      title: "Smart Notepad",
+      desc: "Quick entry",
+      icon: <ClipboardList size={24} />,
+      onClick: () => navigate('/dashboard/notepad'),
+      variant: 'secondary'
+    });
+
+    // Customer Management (Fill 4th slot if needed)
+    if (actions.length < 4) {
+      actions.push({
+        title: "Customers",
+        desc: "Manage profiles",
+        icon: <Users size={24} />,
+        onClick: () => navigate('/dashboard/customers'),
+        variant: 'secondary'
+      });
+    }
+
+    return actions.slice(0, 4);
+  };
+
+  const quickActions = getDynamicQuickActions();
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-[#F5F9FC] flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-[#0F4C81] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-[#0F4C81]">Loading dashboard...</p>
+          <div className="w-16 h-16 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[#0F4C81] font-medium animate-pulse">Syncing store data...</p>
         </div>
       </div>
     );
   }
 
+  const containerAnimation = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemAnimation = {
+    hidden: { opacity: 0, y: 20 },
+    show: { opacity: 1, y: 0 }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50/50 p-6 font-sans">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="min-h-screen bg-[#F5F9FC] pb-32">
+      <AICopilot />
+
+      <motion.div 
+        variants={containerAnimation}
+        initial="hidden"
+        animate="show"
+        className="max-w-5xl mx-auto px-4 sm:px-6 pt-8 space-y-8"
+      >
+        {/* Header Section */}
+        <motion.div variants={itemAnimation} className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-[#0F4C81] mb-2 tracking-tight">Dashboard</h1>
-            <p className="text-gray-500 font-medium">Welcome back, {user?.name || 'User'}! Here's your business overview.</p>
+            <h1 className="text-3xl font-bold text-[#0F4C81] tracking-tight mb-1">
+              {getGreeting()}, {user?.user_metadata?.name?.split(' ')[0] || 'Store Owner'}
+            </h1>
+            <p className="text-[#082032]/60 font-medium">
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </p>
           </div>
-          <div className="flex gap-3">
-            <Button 
-              onClick={() => navigate('/dashboard/inventory')} 
-              className="bg-[#0F4C81] hover:bg-[#0d3f6a] shadow-lg hover:shadow-[#0F4C81]/20 transition-all duration-300"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Product
-            </Button>
-          </div>
-        </div>
-
-        {/* Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {metricCards.map((metric, index) => {
-            // Determine click handler based on title
-            let clickHandler;
-            if (metric.title === 'Total Revenue') {
-              clickHandler = () => setIsRevenueDialogOpen(true);
-            } else if (metric.title === 'Orders') {
-              clickHandler = () => navigate('/dashboard/orders');
-            } else if (metric.title === 'Products') {
-              clickHandler = () => navigate('/dashboard/inventory');
-            } else if (metric.title === 'Customers') {
-              clickHandler = () => navigate('/dashboard/customers');
-            } else {
-              clickHandler = () => navigate('/dashboard');
-            }
-
-            return (
-              <motion.div
-                key={metric.title}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-                onClick={clickHandler}
-                className="cursor-pointer group"
-              >
-                <Card className="relative overflow-hidden p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 h-full">
-                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity pointer-events-none">
-                     <metric.icon className="w-24 h-24 text-[#0F4C81] -mr-8 -mt-8" />
-                  </div>
-                  <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="p-3 bg-[#0F4C81]/5 rounded-xl group-hover:bg-[#0F4C81]/10 transition-colors">
-                            <metric.icon className="w-6 h-6 text-[#0F4C81]" />
-                        </div>
-                         <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${metric.trend === 'up' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                            {metric.trend === 'up' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                            {metric.change}
-                         </div>
-                    </div>
-                    <div>
-                        <p className="text-sm font-medium text-gray-500 mb-1">{metric.title}</p>
-                        <h3 className="text-2xl font-bold text-[#0F4C81]">{metric.value}</h3>
-                    </div>
-                  </div>
-                </Card>
-              </motion.div>
-            );
-          })}
-        </div>
-
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Sales Chart - Takes up 2 columns */}
-          <Card className="lg:col-span-2 p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-[#0F4C81]/5 rounded-lg">
-                    <ChartLine className="w-5 h-5 text-[#0F4C81]" />
-                </div>
-                <h3 className="font-semibold text-[#0F4C81]">Sales Overview</h3>
-              </div>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8 text-[#0F4C81] hover:bg-[#0F4C81]/10 hover:text-[#0F4C81]"
-                onClick={() => setIsRevenueDialogOpen(true)}
-              >
-                <CircleAlert className="w-4 h-4" />
-              </Button>
+          
+          {storeHealth && (
+            <div className="w-full sm:w-auto">
+              <StoreHealthWidget score={storeHealth.score} status={storeHealth.status} />
             </div>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={initialSalesData}>
-                <defs>
-                  <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0F4C81" stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor="#0F4C81" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                <XAxis 
-                  dataKey="day" 
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#64748B', fontSize: 12 }}
-                  dy={10}
-                />
-                <YAxis 
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: '#64748B', fontSize: 12 }}
-                  tickFormatter={(value) => `₹${value}`}
-                />
-                <Tooltip 
-                  contentStyle={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                    border: 'none',
-                    borderRadius: '12px',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                    color: '#0F4C81'
-                  }}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="sales" 
-                  stroke="#0F4C81" 
-                  strokeWidth={3}
-                  fillOpacity={1} 
-                  fill="url(#colorSales)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </Card>
+          )}
+        </motion.div>
 
-          {/* Low Stock Alerts and Expiring Products - Takes up 1 column */}
-          <div className="flex flex-col gap-6">
-            <Card className="p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm flex flex-col h-[400px]">
-              <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                      <div className="p-2 bg-red-50 rounded-lg">
-                          <CircleAlert className="w-5 h-5 text-red-600" />
-                      </div>
-                      <h3 className="font-semibold text-[#0F4C81]">Low Stock</h3>
-                  </div>
-                {lowStockAlerts.length > 0 && (
-                  <span className="bg-red-100 text-red-600 px-2.5 py-0.5 rounded-full text-xs font-bold">
-                    {lowStockAlerts.length}
-                  </span>
-                )}
-              </div>
-              
-              <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                {lowStockAlerts.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center py-8">
-                    <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mb-4">
-                      <Package className="w-8 h-8 text-green-500" />
-                    </div>
-                    <p className="text-gray-900 font-medium">All Stocked Up!</p>
-                    <p className="text-sm text-gray-500 mt-1">Inventory levels are looking good.</p>
-                  </div>
-                ) : (
-                  lowStockAlerts.map((product) => (
-                    <div key={product.id} className="group flex items-center justify-between p-4 bg-white rounded-xl border border-red-100 hover:border-red-200 hover:shadow-md transition-all">
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold text-[#0F4C81] mb-1">{product.productName}</p>
-                        <p className="text-xs text-red-600 font-medium">Only {product.currentStock} left</p>
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-[#0F4C81] hover:bg-[#0F4C81]/10 hover:text-[#0F4C81]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            navigate('/dashboard/inventory');
-                        }}
-                      >
-                        <PackagePlus className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
+        {/* Daily Mission - Top Priority */}
+        <motion.section variants={itemAnimation}>
+          <DailyMissionCard missions={missions} />
+        </motion.section>
 
-            {/* Expiring Products */}
-            <Card className="p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm flex flex-col h-[400px]">
-              <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                      <div className="p-2 bg-orange-50 rounded-lg">
-                          <CircleAlert className="w-5 h-5 text-orange-600" />
-                      </div>
-                      <h3 className="font-semibold text-[#0F4C81]">Expiring Soon</h3>
-                  </div>
-                {expiringProducts.length > 0 && (
-                  <span className="bg-orange-100 text-orange-600 px-2.5 py-0.5 rounded-full text-xs font-bold">
-                    {expiringProducts.length}
-                  </span>
-                )}
+        {/* Priority Actions - Hero Section */}
+        {priorityCards.length > 0 && (
+          <motion.section variants={itemAnimation} className="relative z-10">
+            <PriorityActionStack 
+              cards={priorityCards} 
+              onAction={handlePriorityAction}
+              onDismiss={handleDismiss}
+            />
+          </motion.section>
+        )}
+
+        {/* Key Metrics Grid */}
+        <motion.section variants={itemAnimation}>
+          <h2 className="text-lg font-bold text-[#0F4C81] mb-4 flex items-center gap-2">
+            <TrendingUp size={20} /> Store Pulse
+          </h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-[#0F4C81]/5 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 bg-green-50 rounded-lg text-green-600">
+                  <ShoppingCart size={18} />
+                </div>
+                <span className="text-sm font-medium text-gray-500">Total Sales</span>
               </div>
-              
-              <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                {expiringProducts.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center py-8">
-                    <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mb-4">
-                      <Package className="w-8 h-8 text-green-500" />
-                    </div>
-                    <p className="text-gray-900 font-medium">Fresh Stock!</p>
-                    <p className="text-sm text-gray-500 mt-1">No products expiring within 7 days.</p>
-                  </div>
-                ) : (
-                  expiringProducts.map((product) => (
-                    <div key={product.id} className="group flex items-center justify-between p-4 bg-white rounded-xl border border-orange-100 hover:border-orange-200 hover:shadow-md transition-all">
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold text-[#0F4C81] mb-1">{product.productName}</p>
-                        <p className={`text-xs font-medium ${product.status === 'expired' ? 'text-red-600' : 'text-orange-600'}`}>
-                          {product.status === 'expired' 
-                            ? `Expired ${Math.abs(product.daysRemaining)} days ago` 
-                            : `Expires in ${product.daysRemaining} days`}
-                        </p>
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-[#0F4C81] hover:bg-[#0F4C81]/10 hover:text-[#0F4C81]"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/dashboard/inventory/${product.productId}`);
-                        }}
-                      >
-                        <ArrowUp className="w-4 h-4 rotate-45" />
-                      </Button>
-                    </div>
-                  ))
-                )}
+              <div className="text-2xl font-bold text-[#082032]">₹{(orders.reduce((acc, curr) => acc + curr.total, 0)).toLocaleString()}</div>
+              <div className="text-xs text-green-600 flex items-center gap-1 mt-1 font-medium">
+                <ArrowUpRight size={12} />
+                <span>+12% vs last week</span>
               </div>
-            </Card>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-[#0F4C81]/5 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 bg-blue-50 rounded-lg text-blue-600">
+                  <Package size={18} />
+                </div>
+                <span className="text-sm font-medium text-gray-500">Products</span>
+              </div>
+              <div className="text-2xl font-bold text-[#082032]">{products.length}</div>
+               <div className="text-xs text-blue-600 flex items-center gap-1 mt-1 font-medium">
+                <span>Active Inventory</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-[#0F4C81]/5 shadow-sm hover:shadow-md transition-shadow">
+               <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 bg-orange-50 rounded-lg text-orange-600">
+                  <AlertTriangle size={18} />
+                </div>
+                <span className="text-sm font-medium text-gray-500">Low Stock</span>
+              </div>
+              <div className="text-2xl font-bold text-[#082032]">{stockoutRiskCount}</div>
+               <div className="text-xs text-orange-600 flex items-center gap-1 mt-1 font-medium">
+                <span>Items need reorder</span>
+              </div>
+            </div>
+
+             <div className="bg-white p-5 rounded-2xl border border-[#0F4C81]/5 shadow-sm hover:shadow-md transition-shadow">
+               <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 bg-red-50 rounded-lg text-red-600">
+                  <Clock size={18} />
+                </div>
+                <span className="text-sm font-medium text-gray-500">Expiring</span>
+              </div>
+              <div className="text-2xl font-bold text-[#082032]">{expiringCount}</div>
+               <div className="text-xs text-red-600 flex items-center gap-1 mt-1 font-medium">
+                <span>Risk: ₹{revenueAtRisk.toLocaleString()}</span>
+              </div>
+            </div>
           </div>
-        </div>
+        </motion.section>
 
-        {/* Top Products and Recent Orders */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Top Products */}
-          <Card className="p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm">
-            <div className="flex items-center gap-2 mb-6">
-               <div className="p-2 bg-[#0F4C81]/5 rounded-lg">
-                  <TrendingUp className="w-5 h-5 text-[#0F4C81]" />
+        {/* Quick Actions */}
+        <motion.section variants={itemAnimation}>
+          <h2 className="text-lg font-bold text-[#0F4C81] mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {quickActions.map((action, index) => (
+              <button 
+                key={index}
+                onClick={action.onClick}
+                className={cn(
+                  "group p-6 rounded-2xl text-left relative overflow-hidden transition-all",
+                  action.variant === 'primary' 
+                    ? "bg-gradient-to-br from-[#0F4C81] to-[#1E6091] text-white shadow-lg shadow-[#0F4C81]/20 hover:scale-[1.02]" 
+                    : "bg-white border border-[#0F4C81]/10 text-[#0F4C81] hover:border-[#0F4C81]/30 hover:shadow-md"
+                )}
+              >
+                {action.bgIcon && (
+                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    {action.bgIcon}
+                  </div>
+                )}
+                
+                {action.variant === 'primary' ? (
+                  action.icon
+                ) : (
+                  <div className="bg-[#0F4C81]/5 w-12 h-12 rounded-xl flex items-center justify-center mb-4 group-hover:bg-[#0F4C81]/10 transition-colors">
+                    {action.icon}
+                  </div>
+                )}
+                
+                <div className={cn(
+                  "font-bold text-lg",
+                  action.variant === 'secondary' && "text-[#082032]"
+                )}>
+                  {action.title}
+                </div>
+                <div className={cn(
+                  "text-sm",
+                  action.variant === 'primary' ? "text-white/70" : "text-[#082032]/60"
+                )}>
+                  {action.desc}
+                </div>
+              </button>
+            ))}
+          </div>
+        </motion.section>
+
+        {/* Recent Activity */}
+        <motion.section variants={itemAnimation} className="pb-8">
+          <div className="flex items-center justify-between mb-4">
+             <h2 className="text-lg font-bold text-[#0F4C81]">Recent Activity</h2>
+             <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard/orders')} className="text-[#0F4C81] hover:bg-[#0F4C81]/5">
+               View All <ChevronRight size={16} className="ml-1" />
+             </Button>
+          </div>
+          
+          <div className="bg-white rounded-2xl border border-[#0F4C81]/10 shadow-sm overflow-hidden">
+            {orders.length === 0 ? (
+               <div className="p-8 text-center text-[#082032]/40">
+                 <Store size={48} className="mx-auto mb-3 opacity-20" />
+                 <p>No recent activity found.</p>
                </div>
-              <h3 className="font-semibold text-[#0F4C81]">Top Performing Products</h3>
-            </div>
-            <div className="space-y-4">
-              {topProductsSales.length === 0 ? (
-                <div className="text-center py-12">
-                   <p className="text-gray-500">No sales data available yet.</p>
-                </div>
-              ) : (
-                topProductsSales.map((product, index) => (
-                  <div key={product.id} className="flex items-center justify-between p-4 hover:bg-[#0F4C81]/5 rounded-xl transition-colors group cursor-default">
+            ) : (
+              <div className="divide-y divide-[#0F4C81]/5">
+                {orders.slice(0, 5).map((order) => (
+                  <div key={order.id} className="p-4 flex items-center justify-between hover:bg-[#F5F9FC] transition-colors cursor-pointer" onClick={() => navigate('/dashboard/orders')}>
                     <div className="flex items-center gap-4">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                          index === 0 ? 'bg-yellow-100 text-yellow-700' :
-                          index === 1 ? 'bg-gray-100 text-gray-700' :
-                          index === 2 ? 'bg-orange-100 text-orange-700' :
-                          'bg-[#0F4C81]/10 text-[#0F4C81]'
-                      }`}>
-                        {index + 1}
+                      <div className="w-10 h-10 rounded-full bg-[#0F4C81]/5 flex items-center justify-center text-[#0F4C81]">
+                        <ShoppingCart size={18} />
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-[#0F4C81] group-hover:text-[#0F4C81]">{product.name}</p>
-                        <p className="text-xs text-gray-500">{product.sold} units sold</p>
+                        <div className="font-semibold text-[#082032]">Order #{order.id.slice(0, 8)}</div>
+                        <div className="text-xs text-[#082032]/50">
+                          {new Date(order.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {order.items.length} items
+                        </div>
                       </div>
                     </div>
                     <div className="text-right">
-                         <span className="text-xs font-medium px-2 py-1 bg-gray-100 text-gray-600 rounded-lg">
-                            {product.stock} in stock
-                         </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-
-          {/* Recent Orders */}
-          <Card className="p-6 bg-white/80 backdrop-blur-md border border-[#0F4C81]/10 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-               <div className="flex items-center gap-2">
-                  <div className="p-2 bg-[#0F4C81]/5 rounded-lg">
-                      <ShoppingCart className="w-5 h-5 text-[#0F4C81]" />
-                  </div>
-                  <h3 className="font-semibold text-[#0F4C81]">Recent Orders</h3>
-               </div>
-               <Button variant="ghost" size="sm" className="text-xs text-[#0F4C81] hover:text-[#0d3f6a]" onClick={() => navigate('/dashboard/orders')}>
-                   View All
-               </Button>
-            </div>
-            <div className="space-y-4">
-              {recentOrders.length === 0 ? (
-                <div className="text-center py-12">
-                   <p className="text-gray-500">No orders received yet.</p>
-                </div>
-              ) : (
-                recentOrders.map((order) => (
-                  <div key={order.id} className="flex items-center justify-between p-4 hover:bg-[#0F4C81]/5 rounded-xl transition-colors cursor-pointer" onClick={() => navigate('/dashboard/orders')}>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                          <p className="text-sm font-semibold text-[#0F4C81]">{order.customer}</p>
-                          <span className="text-xs text-gray-400">•</span>
-                          <span className="text-xs text-gray-500">{order.time}</span>
+                      <div className="font-bold text-[#0F4C81]">₹{order.total.toLocaleString()}</div>
+                      <div className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-block mt-1">
+                        Completed
                       </div>
-                      <p className="text-xs text-gray-600">
-                        {order.items} {order.items === 1 ? 'item' : 'items'}
-                      </p>
-                    </div>
-                    <div className="text-right flex flex-col items-end gap-1">
-                      <p className="text-sm font-bold text-[#0F4C81]">{order.amount}</p>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                        order.status === 'Completed' ? 'bg-green-100 text-green-700' :
-                        order.status === 'Pending' ? 'bg-yellow-100 text-yellow-700' :
-                        order.status === 'Processing' ? 'bg-blue-100 text-blue-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>
-                        {order.status}
-                      </span>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
-      <RevenueAnalysisDialog
-        isOpen={isRevenueDialogOpen}
-        onClose={() => setIsRevenueDialogOpen(false)}
-        products={products}
-        orders={orders}
-      />
+                ))}
+              </div>
+            )}
+          </div>
+        </motion.section>
+
+        {/* End of Day Summary */}
+        <EndOfDaySummary summary={eodSummary} />
+      </motion.div>
     </div>
   );
 }

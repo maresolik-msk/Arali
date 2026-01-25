@@ -13,7 +13,14 @@ import {
   RotateCcw,
   CheckCircle2,
   X,
-  PackageSearch
+  PackageSearch,
+  PauseCircle,
+  PlayCircle,
+  FileText,
+  Printer,
+  Share2,
+  History,
+  AlertCircle
 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -22,14 +29,24 @@ import { Badge } from '../components/ui/badge';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from '../components/ui/sheet';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { productsApi, ordersApi } from '../services/api';
+import { productsApi, ordersApi, invoicesApi, heldBillsApi, auditLogsApi, shopSettingsApi } from '../services/api';
 import { generateProductImage } from '../services/ai';
-import type { Product, Order, OrderItem } from '../data/dashboardData';
+import type { Product, Order, OrderItem, PaymentMethod } from '../data/dashboardData';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 interface CartItem extends Product {
   cartQuantity: number;
+}
+
+interface HeldBill {
+  id: string;
+  items: CartItem[];
+  totalAmount: number;
+  customerName?: string; // Optional customer name for held bill
+  createdAt: string;
 }
 
 export function POS() {
@@ -38,28 +55,67 @@ export function POS() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [cart, setCart] = useState<CartItem[]>([]);
+  
+  // Checkout States
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'summary' | 'payment' | 'success'>('summary');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'upi'>('cash');
-  const [amountPaid, setAmountPaid] = useState('');
+  
+  // Payment States
+  const [paymentMode, setPaymentMode] = useState<'single' | 'split'>('single');
+  const [splitPayments, setSplitPayments] = useState<PaymentMethod[]>([]);
+  const [currentSplitMethod, setCurrentSplitMethod] = useState<'CASH' | 'CARD' | 'UPI'>('CASH');
+  const [currentSplitAmount, setCurrentSplitAmount] = useState('');
+  const [singlePaymentMethod, setSinglePaymentMethod] = useState<'CASH' | 'CARD' | 'UPI'>('CASH');
+  const [amountReceived, setAmountReceived] = useState('');
 
-  // Load products on mount
+  // Held Bills State
+  const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
+  const [isHeldBillsOpen, setIsHeldBillsOpen] = useState(false);
+
+  // Success State
+  const [lastOrder, setLastOrder] = useState<Order | null>(null);
+  
+  // Settings
+  const [gstIn, setGstIn] = useState<string | undefined>(undefined);
+
+  // Load products & Held Bills on mount
   useEffect(() => {
-    const loadProducts = async () => {
+    const loadData = async () => {
       try {
         setIsLoading(true);
-        const data = await productsApi.getAll();
-        setProducts(data || []);
+        const [productsData, heldBillsData, settings] = await Promise.all([
+          productsApi.getAll(),
+          heldBillsApi.getAll().catch(() => []), // Fail gracefully if API not ready
+          shopSettingsApi.get().catch(() => ({ gstIn: undefined } as any))
+        ]);
+        setProducts(productsData || []);
+        setHeldBills(heldBillsData || []);
+        setGstIn(settings?.gstIn);
+        
+        // Load cart from local storage (Offline Safety)
+        const savedCart = localStorage.getItem('pos_cart');
+        if (savedCart) {
+          try {
+            setCart(JSON.parse(savedCart));
+          } catch (e) {
+            console.error('Failed to load cart from local storage');
+          }
+        }
       } catch (error) {
-        console.error('Error loading products:', error);
-        toast.error('Failed to load products');
+        console.error('Error loading data:', error);
+        toast.error('Failed to load initial data');
       } finally {
         setIsLoading(false);
       }
     };
-    loadProducts();
+    loadData();
   }, []);
+
+  // Save cart to local storage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('pos_cart', JSON.stringify(cart));
+  }, [cart]);
 
   // Filter products
   const filteredProducts = useMemo(() => {
@@ -78,9 +134,12 @@ export function POS() {
   }, [products]);
 
   // Cart calculations
-  const cartTotal = useMemo(() => {
+  const cartSubtotal = useMemo(() => {
     return cart.reduce((total, item) => total + (item.sellingPrice * item.cartQuantity), 0);
   }, [cart]);
+
+  const taxAmount = cartSubtotal * 0.05; // 5% Tax assumption
+  const cartTotal = cartSubtotal + taxAmount;
 
   const cartItemCount = useMemo(() => {
     return cart.reduce((total, item) => total + item.cartQuantity, 0);
@@ -108,11 +167,12 @@ export function POS() {
       }
       return [...prev, { ...product, cartQuantity: 1 }];
     });
-    toast.success(`Added ${product.name} to cart`);
+    toast.success(`Added ${product.name}`);
   };
 
   const removeFromCart = (productId: number) => {
     setCart(prev => prev.filter(item => item.id !== productId));
+    auditLogsApi.log({ action: 'VOID_ITEM', reason: 'User removed item from cart', orderId: 'draft' });
   };
 
   const updateQuantity = (productId: number, delta: number) => {
@@ -120,7 +180,7 @@ export function POS() {
       return prev.map(item => {
         if (item.id === productId) {
           const newQuantity = item.cartQuantity + delta;
-          if (newQuantity <= 0) return item; // Don't remove, just stop at 1
+          if (newQuantity <= 0) return item; 
           
           const product = products.find(p => p.id === productId);
           if (product && newQuantity > product.stock) {
@@ -138,20 +198,99 @@ export function POS() {
   const clearCart = () => {
     if (confirm('Are you sure you want to clear the cart?')) {
       setCart([]);
+      auditLogsApi.log({ action: 'VOID_CART', reason: 'User cleared entire cart', orderId: 'draft' });
+    }
+  };
+
+  // Hold Bill Logic
+  const handleHoldBill = async () => {
+    if (cart.length === 0) return;
+    
+    try {
+      const bill: any = {
+        id: `held-${Date.now()}`,
+        items: cart,
+        totalAmount: cartTotal,
+        createdAt: new Date().toISOString(),
+        customerName: 'Walk-in Customer' // Could add input for this
+      };
+      
+      // Optimistic update
+      setHeldBills(prev => [bill, ...prev]);
+      setCart([]);
+      
+      // Async backend call
+      await heldBillsApi.add(bill);
+      auditLogsApi.log({ action: 'HOLD_BILL', reason: 'User held bill', orderId: bill.id });
+      
+      toast.success('Bill held successfully');
+    } catch (error) {
+      console.error('Error holding bill:', error);
+      toast.error('Failed to save held bill (saved locally only)');
+    }
+  };
+
+  const handleResumeBill = async (bill: HeldBill) => {
+    if (cart.length > 0) {
+      if (!confirm('Current cart is not empty. Overwrite?')) return;
+    }
+    
+    setCart(bill.items);
+    setHeldBills(prev => prev.filter(b => b.id !== bill.id));
+    setIsHeldBillsOpen(false);
+    
+    // Async cleanup
+    try {
+      await heldBillsApi.delete(bill.id);
+    } catch (e) {
+      console.error("Failed to delete held bill from server", e);
     }
   };
 
   // Checkout process
-  const handleCheckout = async () => {
+  const handleCheckout = () => {
     if (cart.length === 0) return;
     setIsCheckoutOpen(true);
     setCheckoutStep('summary');
+    setPaymentMode('single');
+    setSplitPayments([]);
+    setAmountReceived('');
   };
 
+  const addSplitPayment = () => {
+    if (!currentSplitAmount || parseFloat(currentSplitAmount) <= 0) return;
+    
+    const amount = parseFloat(currentSplitAmount);
+    setSplitPayments(prev => [...prev, { method: currentSplitMethod, amount }]);
+    setCurrentSplitAmount('');
+  };
+
+  const removeSplitPayment = (index: number) => {
+    setSplitPayments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const totalSplitPaid = splitPayments.reduce((sum, p) => sum + p.amount, 0);
+  const remainingSplitAmount = Math.max(0, cartTotal - totalSplitPaid);
+
   const processPayment = async () => {
+    // Validation
+    if (paymentMode === 'split') {
+        if (Math.abs(totalSplitPaid - cartTotal) > 1) { // 1 rupee tolerance
+            toast.error(`Payment mismatch. Total paid: ₹${totalSplitPaid}, Required: ₹${cartTotal.toFixed(2)}`);
+            return;
+        }
+    } else {
+        // Single payment validation implicitly handled by flow, but good to check
+    }
+
     setIsProcessing(true);
     try {
-      // 1. Create Order
+      // 1. Prepare Payment Breakup
+      const paymentBreakup: PaymentMethod[] = paymentMode === 'single' 
+        ? [{ method: singlePaymentMethod, amount: cartTotal }]
+        : splitPayments;
+
+      // 2. Create Order
       const orderItems: OrderItem[] = cart.map(item => ({
         productId: item.id,
         productName: item.name,
@@ -161,28 +300,48 @@ export function POS() {
       }));
 
       const newOrder = {
-        customerId: 0, // Guest customer for now, or could implement customer selection
+        customerId: 0,
         customerName: 'Guest Customer',
         items: orderItems,
         totalAmount: cartTotal,
         status: 'Completed' as const,
-        notes: `Paid via ${paymentMethod}`
+        paymentBreakup: paymentBreakup,
+        createdAt: new Date(),
+        updatedAt: new Date()
       };
 
-      await ordersApi.add(newOrder as any); // Using 'any' because strict typing might mismatch with partial order
+      // @ts-ignore - TS might complain about optional fields but API handles it
+      const createdOrder = await ordersApi.add(newOrder);
+      setLastOrder(createdOrder);
 
-      // 2. Update Inventory (Record Sales)
-      // Run sequentially to avoid race conditions or backend overload
+      // 3. Generate Invoice (Async)
+      const invoice = {
+          id: `inv-${Date.now()}`,
+          orderId: createdOrder.id,
+          invoiceNumber: `INV-${new Date().getFullYear()}-${Date.now().toString().substr(-6)}`,
+          type: gstIn ? 'GST' : 'SIMPLE',
+          subtotal: cartSubtotal,
+          tax: taxAmount,
+          total: cartTotal,
+          paymentBreakup: paymentBreakup,
+          createdAt: new Date().toISOString()
+      };
+      await invoicesApi.create(invoice);
+
+      // 4. Update Inventory
       for (const item of cart) {
         await productsApi.recordSales(item.id, item.cartQuantity);
       }
 
-      // 3. Update local product state
+      // 5. Update local state
       const updatedProducts = await productsApi.getAll();
       setProducts(updatedProducts);
 
       setCheckoutStep('success');
       setCart([]);
+      localStorage.removeItem('pos_cart');
+      
+      toast.success('Order completed successfully!');
     } catch (error) {
       console.error('Checkout error:', error);
       toast.error('Checkout failed. Please try again.');
@@ -194,8 +353,21 @@ export function POS() {
   const resetCheckout = () => {
     setIsCheckoutOpen(false);
     setCheckoutStep('summary');
-    setPaymentMethod('cash');
-    setAmountPaid('');
+    setSinglePaymentMethod('CASH');
+    setAmountReceived('');
+    setLastOrder(null);
+  };
+
+  const handlePrintInvoice = () => {
+      toast.info("Printing invoice...");
+      // In a real app, this would trigger window.print() on a hidden iframe
+  };
+
+  const handleShareInvoice = () => {
+      // Share logic (WhatsApp)
+      const message = `Invoice for Order #${lastOrder?.id}. Total: ₹${lastOrder?.totalAmount}`;
+      const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
   };
 
   return (
@@ -242,9 +414,9 @@ export function POS() {
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredProducts.map((product) => (
+              {filteredProducts.map((product, index) => (
                 <Card 
-                  key={product.id}
+                  key={`${product.id}-${index}`}
                   className="overflow-hidden cursor-pointer hover:shadow-lg transition-all duration-300 group border-none shadow-md"
                   onClick={() => addToCart(product)}
                 >
@@ -262,7 +434,7 @@ export function POS() {
                     )}
                     {product.stock <= 5 && product.stock > 0 && (
                       <Badge className="absolute top-2 right-2 bg-yellow-500 hover:bg-yellow-600">
-                        Low Stock: {product.stock}
+                        Low: {product.stock}
                       </Badge>
                     )}
                     {product.stock === 0 && (
@@ -295,7 +467,37 @@ export function POS() {
             <ShoppingCart className="w-5 h-5 text-[#0F4C81]" />
             <h2 className="font-semibold text-[#0F4C81]">Current Order</h2>
           </div>
-          <Badge variant="secondary" className="bg-white text-[#0F4C81]">{cartItemCount} Items</Badge>
+          <div className="flex gap-2">
+             <Sheet open={isHeldBillsOpen} onOpenChange={setIsHeldBillsOpen}>
+                <SheetTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 text-[#0F4C81]">
+                        <History className="w-4 h-4 mr-1" />
+                        Held ({heldBills.length})
+                    </Button>
+                </SheetTrigger>
+                <SheetContent>
+                    <SheetHeader>
+                        <SheetTitle>Held Bills</SheetTitle>
+                        <SheetDescription>Resume a previously held bill.</SheetDescription>
+                    </SheetHeader>
+                    <div className="mt-4 space-y-3">
+                        {heldBills.length === 0 ? (
+                            <p className="text-center text-gray-500 py-8">No held bills.</p>
+                        ) : heldBills.map(bill => (
+                            <Card key={bill.id} className="p-3 flex justify-between items-center">
+                                <div>
+                                    <p className="font-bold">₹{bill.totalAmount.toFixed(2)}</p>
+                                    <p className="text-xs text-gray-500">{new Date(bill.createdAt).toLocaleTimeString()}</p>
+                                    <p className="text-xs text-gray-500">{bill.items.length} items</p>
+                                </div>
+                                <Button size="sm" onClick={() => handleResumeBill(bill)}>Resume</Button>
+                            </Card>
+                        ))}
+                    </div>
+                </SheetContent>
+             </Sheet>
+             <Badge variant="secondary" className="bg-white text-[#0F4C81]">{cartItemCount} Items</Badge>
+          </div>
         </div>
 
         <ScrollArea className="flex-1 p-4">
@@ -363,34 +565,41 @@ export function POS() {
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-gray-500">
               <span>Subtotal</span>
-              <span>₹{cartTotal.toFixed(2)}</span>
+              <span>₹{cartSubtotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm text-gray-500">
               <span>Tax (5%)</span>
-              <span>₹{(cartTotal * 0.05).toFixed(2)}</span>
+              <span>₹{taxAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-lg font-bold text-[#0F4C81] pt-2 border-t border-gray-200">
               <span>Total</span>
-              <span>₹{(cartTotal * 1.05).toFixed(2)}</span>
+              <span>₹{cartTotal.toFixed(2)}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-2">
             <Button 
               variant="outline" 
               className="text-red-500 hover:text-red-600 hover:bg-red-50 border-red-200"
               onClick={clearCart}
               disabled={cart.length === 0}
             >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Clear
+              <Trash2 className="w-4 h-4" />
+            </Button>
+            <Button
+                variant="outline"
+                className="text-orange-500 hover:text-orange-600 hover:bg-orange-50 border-orange-200"
+                onClick={handleHoldBill}
+                disabled={cart.length === 0}
+            >
+                <PauseCircle className="w-4 h-4 mr-1" /> Hold
             </Button>
             <Button 
               className="bg-[#0F4C81] hover:bg-[#0F4C81]/90"
               onClick={handleCheckout}
               disabled={cart.length === 0}
             >
-              Pay Now
+              Pay
             </Button>
           </div>
         </div>
@@ -402,13 +611,13 @@ export function POS() {
           <DialogHeader>
             <DialogTitle>
               {checkoutStep === 'summary' && 'Order Summary'}
-              {checkoutStep === 'payment' && 'Payment Method'}
+              {checkoutStep === 'payment' && 'Payment'}
               {checkoutStep === 'success' && 'Order Completed'}
             </DialogTitle>
             <DialogDescription id="checkout-description">
               {checkoutStep === 'success' 
                 ? 'Your order has been successfully processed.' 
-                : `Total Amount: ₹${(cartTotal * 1.05).toFixed(2)}`
+                : `Total Payable: ₹${cartTotal.toFixed(2)}`
               }
             </DialogDescription>
           </DialogHeader>
@@ -424,7 +633,7 @@ export function POS() {
                 ))}
                 <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between font-bold">
                   <span>Total (Inc. Tax)</span>
-                  <span>₹{(cartTotal * 1.05).toFixed(2)}</span>
+                  <span>₹{cartTotal.toFixed(2)}</span>
                 </div>
               </div>
               <Button className="w-full bg-[#0F4C81]" onClick={() => setCheckoutStep('payment')}>
@@ -435,54 +644,104 @@ export function POS() {
 
           {checkoutStep === 'payment' && (
             <div className="space-y-6 py-4">
-              <div className="grid grid-cols-3 gap-3">
-                <Button 
-                  variant={paymentMethod === 'cash' ? 'default' : 'outline'}
-                  className={`h-24 flex flex-col gap-2 ${paymentMethod === 'cash' ? 'bg-[#0F4C81]' : ''}`}
-                  onClick={() => setPaymentMethod('cash')}
-                >
-                  <Banknote className="w-8 h-8" />
-                  Cash
-                </Button>
-                <Button 
-                  variant={paymentMethod === 'card' ? 'default' : 'outline'}
-                  className={`h-24 flex flex-col gap-2 ${paymentMethod === 'card' ? 'bg-[#0F4C81]' : ''}`}
-                  onClick={() => setPaymentMethod('card')}
-                >
-                  <CreditCard className="w-8 h-8" />
-                  Card
-                </Button>
-                <Button 
-                  variant={paymentMethod === 'upi' ? 'default' : 'outline'}
-                  className={`h-24 flex flex-col gap-2 ${paymentMethod === 'upi' ? 'bg-[#0F4C81]' : ''}`}
-                  onClick={() => setPaymentMethod('upi')}
-                >
-                  <QrCode className="w-8 h-8" />
-                  UPI
-                </Button>
-              </div>
+              {/* Payment Mode Selector */}
+              <Tabs value={paymentMode} onValueChange={(v: any) => setPaymentMode(v)} className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="single">Single Payment</TabsTrigger>
+                  <TabsTrigger value="split">Split Payment</TabsTrigger>
+                </TabsList>
+              </Tabs>
 
-              {paymentMethod === 'cash' && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Amount Received</label>
-                  <Input 
-                    type="number" 
-                    placeholder="Enter amount" 
-                    value={amountPaid}
-                    onChange={(e) => setAmountPaid(e.target.value)}
-                  />
-                  {amountPaid && parseFloat(amountPaid) >= (cartTotal * 1.05) && (
-                    <div className="text-green-600 text-sm font-medium mt-1">
-                      Change to return: ₹{(parseFloat(amountPaid) - (cartTotal * 1.05)).toFixed(2)}
-                    </div>
-                  )}
-                </div>
+              {paymentMode === 'single' ? (
+                  <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        {['CASH', 'CARD', 'UPI'].map((method) => (
+                            <Button 
+                                key={method}
+                                variant={singlePaymentMethod === method ? 'default' : 'outline'}
+                                className={`h-20 flex flex-col gap-2 ${singlePaymentMethod === method ? 'bg-[#0F4C81]' : ''}`}
+                                onClick={() => setSinglePaymentMethod(method as any)}
+                            >
+                                {method === 'CASH' && <Banknote className="w-6 h-6" />}
+                                {method === 'CARD' && <CreditCard className="w-6 h-6" />}
+                                {method === 'UPI' && <QrCode className="w-6 h-6" />}
+                                {method}
+                            </Button>
+                        ))}
+                      </div>
+                      {singlePaymentMethod === 'CASH' && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Amount Received</label>
+                          <Input 
+                            type="number" 
+                            placeholder="Enter amount" 
+                            value={amountReceived}
+                            onChange={(e) => setAmountReceived(e.target.value)}
+                          />
+                          {amountReceived && parseFloat(amountReceived) >= cartTotal && (
+                            <div className="text-green-600 text-sm font-medium mt-1">
+                              Change to return: ₹{(parseFloat(amountReceived) - cartTotal).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                  </div>
+              ) : (
+                  <div className="space-y-4">
+                      <div className="bg-gray-50 p-3 rounded-md mb-2">
+                          <div className="flex justify-between text-sm mb-1">
+                              <span>Total Due:</span>
+                              <span className="font-bold">₹{cartTotal.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm mb-1 text-green-600">
+                              <span>Paid:</span>
+                              <span>₹{totalSplitPaid.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm font-bold text-red-500 border-t pt-1">
+                              <span>Remaining:</span>
+                              <span>₹{remainingSplitAmount.toFixed(2)}</span>
+                          </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                          <Select value={currentSplitMethod} onValueChange={(v: any) => setCurrentSplitMethod(v)}>
+                              <SelectTrigger className="w-[100px]">
+                                  <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                  <SelectItem value="CASH">Cash</SelectItem>
+                                  <SelectItem value="CARD">Card</SelectItem>
+                                  <SelectItem value="UPI">UPI</SelectItem>
+                              </SelectContent>
+                          </Select>
+                          <Input 
+                              type="number" 
+                              placeholder="Amount" 
+                              value={currentSplitAmount}
+                              onChange={(e) => setCurrentSplitAmount(e.target.value)}
+                              className="flex-1"
+                          />
+                          <Button onClick={addSplitPayment} disabled={!currentSplitAmount}>Add</Button>
+                      </div>
+
+                      <div className="space-y-2">
+                          {splitPayments.map((payment, idx) => (
+                              <div key={idx} className="flex justify-between items-center bg-white border p-2 rounded">
+                                  <span>{payment.method}</span>
+                                  <div className="flex items-center gap-2">
+                                      <span className="font-bold">₹{payment.amount}</span>
+                                      <button onClick={() => removeSplitPayment(idx)} className="text-red-500"><X size={14} /></button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
               )}
 
               <Button 
                 className="w-full bg-[#0F4C81]" 
                 onClick={processPayment}
-                disabled={isProcessing}
+                disabled={isProcessing || (paymentMode === 'split' && remainingSplitAmount > 1)}
               >
                 {isProcessing ? 'Processing...' : 'Complete Order'}
               </Button>
@@ -496,9 +755,19 @@ export function POS() {
               </div>
               <div>
                 <h3 className="text-xl font-bold text-[#0F4C81]">Payment Successful!</h3>
-                <p className="text-gray-500">Order has been created successfully.</p>
+                <p className="text-gray-500">Order #{lastOrder?.id} created.</p>
               </div>
-              <Button onClick={resetCheckout} className="mt-4">
+              
+              <div className="grid grid-cols-2 gap-3 w-full mt-6">
+                  <Button variant="outline" onClick={handlePrintInvoice}>
+                      <Printer className="w-4 h-4 mr-2" /> Print Invoice
+                  </Button>
+                  <Button variant="outline" onClick={handleShareInvoice}>
+                      <Share2 className="w-4 h-4 mr-2" /> Share
+                  </Button>
+              </div>
+
+              <Button onClick={resetCheckout} className="w-full">
                 Start New Sale
               </Button>
             </div>

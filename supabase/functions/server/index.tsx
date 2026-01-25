@@ -3,6 +3,9 @@ import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as kv from "./kv_store.tsx";
+import { parseSalesNote, parsePurchaseNote, parseMultiIntent, generateDailyBrief, generateOwnerAnswer } from "./aiService.tsx";
+import { aiInsightsEngine } from "./aiInsightsEngine.tsx";
+import { dashboardService } from "./dashboardService.tsx";
 import { sendWaitlistEmail, sendOTPEmail } from "./emailService.tsx";
 const app = new Hono();
 
@@ -11,6 +14,15 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+// Pricing Plan Limits (Hard Enforcement)
+const PLAN_LIMITS: Record<string, { maxSkus: number }> = {
+  FREE: { maxSkus: 100 },
+  STARTER: { maxSkus: 500 },
+  GROWTH: { maxSkus: 2000 },
+  PRO: { maxSkus: Infinity },
+  ENTERPRISE: { maxSkus: Infinity },
+};
 
 // Enable logger
 app.use('*', logger(console.log));
@@ -219,6 +231,18 @@ app.post("/make-server-29b58f9a/products", async (c) => {
     const product = await c.req.json();
     const products = await kv.get(getUserKey(user.id, 'products'));
     const productsList = Array.isArray(products) ? products : [];
+
+    // Plan Enforcement
+    const plan = (user.user_metadata?.plan as string) || 'FREE';
+    const limit = PLAN_LIMITS[plan]?.maxSkus || 100;
+    
+    if (productsList.length >= limit) {
+      return c.json({ 
+        error: "PLAN_LIMIT_EXCEEDED", 
+        message: `You have reached the maximum of ${limit} products allowed on your ${plan} plan.` 
+      }, 403);
+    }
+
     productsList.push(product);
     await kv.set(getUserKey(user.id, 'products'), productsList);
     
@@ -323,10 +347,27 @@ app.post("/make-server-29b58f9a/products/:id/restock", async (c) => {
           expiryDate: expiryDate || productsList[index].expiryDate,
           quantity: quantity,
           receivedDate: new Date().toISOString(),
+          originalQuantity: quantity, // Track original for history
         });
       }
     }
     
+    // Record movement (Audit Trail)
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    
+    movementsList.push({
+        id: `mov-${Date.now()}`,
+        productId: id,
+        productName: productsList[index].name,
+        type: 'restock',
+        quantity: quantity,
+        reason: 'Restock',
+        batchNumber: batchNumber,
+        date: new Date().toISOString()
+    });
+    
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
     await kv.set(getUserKey(user.id, 'products'), productsList);
     
     console.log('Product restocked:', id, 'Quantity:', quantity, 'Batch:', batchNumber, 'for user:', user.email);
@@ -404,6 +445,21 @@ app.post("/make-server-29b58f9a/products/:id/record-sales", async (c) => {
       }
     }
     
+    // Record movement
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    
+    movementsList.push({
+        id: `mov-${Date.now()}`,
+        productId: id,
+        productName: product.name,
+        type: 'sale',
+        quantity: -quantitySold,
+        reason: 'Sale',
+        date: new Date().toISOString()
+    });
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+
     await kv.set(getUserKey(user.id, 'products'), productsList);
     
     console.log('Sales recorded:', id, 'Quantity sold:', quantitySold, 'for user:', user.email);
@@ -411,6 +467,495 @@ app.post("/make-server-29b58f9a/products/:id/record-sales", async (c) => {
   } catch (error) {
     console.error("Error recording sales:", error);
     return c.json({ error: "Failed to record sales", details: String(error) }, 500);
+  }
+});
+
+// Record batch sales (Atomic-like)
+app.post("/make-server-29b58f9a/sales/batch", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const { items } = await c.req.json(); // items: [{ productId, quantity }]
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return c.json({ error: "Invalid items" }, 400);
+    }
+
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    
+    // 1. Validation Phase
+    for (const item of items) {
+      const product = productsList.find((p: any) => p.id === item.productId);
+      if (!product) return c.json({ error: `Product not found: ${item.productId}` }, 404);
+      if (product.stock < item.quantity) {
+        return c.json({ error: `Insufficient stock for ${product.name}` }, 400);
+      }
+    }
+
+    // 2. Execution Phase
+    const transactionId = `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    const timestamp = new Date().toISOString();
+
+    for (const item of items) {
+      const index = productsList.findIndex((p: any) => p.id === item.productId);
+      const product = productsList[index];
+      
+      // Update Stock
+      product.stock -= item.quantity;
+      product.unitsSold = (product.unitsSold || 0) + item.quantity;
+      product.revenue = (product.revenue || 0) + (item.quantity * product.price); // Assumes price is selling price
+      product.updatedAt = new Date();
+
+      // Deduct batches (FIFO)
+      if (product.batches && product.batches.length > 0) {
+        let remaining = item.quantity;
+        const sortedBatches = [...product.batches].sort((a: any, b: any) => {
+            if (!a.expiryDate) return 1;
+            if (!b.expiryDate) return -1;
+            return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+        });
+
+        for (const batch of sortedBatches) {
+            if (remaining <= 0) break;
+            const originalBatch = product.batches.find((b: any) => b.id === batch.id);
+            if (originalBatch && originalBatch.quantity > 0) {
+                const take = Math.min(originalBatch.quantity, remaining);
+                originalBatch.quantity -= take;
+                remaining -= take;
+            }
+        }
+      }
+
+      // Record Movement
+      movementsList.push({
+        id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        transactionId: transactionId, // Key for undo
+        productId: item.productId,
+        productName: product.name,
+        type: 'sale',
+        quantity: -item.quantity,
+        reason: 'Smart Notepad Sale',
+        date: timestamp
+      });
+    }
+
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+
+    console.log(`Batch sale recorded. TX: ${transactionId} for user ${user.email}`);
+    return c.json({ success: true, transactionId });
+
+  } catch (error) {
+    console.error("Batch sale error:", error);
+    return c.json({ error: "Failed to process sale" }, 500);
+  }
+});
+
+// Record batch purchases (Atomic-like)
+app.post("/make-server-29b58f9a/purchases/batch", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const { items } = await c.req.json(); // items: [{ productId, quantity, costPrice, unit }]
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return c.json({ error: "Invalid items" }, 400);
+    }
+
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    
+    // 1. Validation Phase
+    for (const item of items) {
+        if (item.productId) {
+            const product = productsList.find((p: any) => p.id === item.productId);
+            if (!product) return c.json({ error: `Product not found: ${item.productId}` }, 404);
+        }
+        // If productId is null, it's a new product, which we might support or skip. 
+        // For strictness, let's skip or error. The parsing might return null.
+        // Let's assume we only process matched products for now.
+    }
+
+    // 2. Execution Phase
+    const transactionId = `tx-pur-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    const timestamp = new Date().toISOString();
+
+    for (const item of items) {
+      if (!item.productId) continue;
+
+      const index = productsList.findIndex((p: any) => p.id === item.productId);
+      const product = productsList[index];
+      
+      // Update Stock
+      product.stock += item.quantity;
+      
+      // Update Cost Price (Weighted Average)
+      if (item.costPrice > 0) {
+          const totalValue = (product.stock * product.costPrice) + (item.quantity * item.costPrice);
+          const totalQty = product.stock + item.quantity; // Note: stock already updated above? No, wait.
+          // Correct weighted avg calc:
+          // We added item.quantity to product.stock. So old stock was product.stock - item.quantity.
+          const oldStock = product.stock - item.quantity;
+          const oldTotalValue = oldStock * product.costPrice;
+          const newTotalValue = oldTotalValue + (item.quantity * item.costPrice);
+          product.costPrice = newTotalValue / product.stock;
+      }
+      
+      product.updatedAt = new Date();
+
+      // Create Batch
+      if (!product.batches) product.batches = [];
+      product.batches.push({
+          id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          batchNumber: `AI-${transactionId}`,
+          expiryDate: null, // AI might parse this later
+          quantity: item.quantity,
+          receivedDate: timestamp,
+          originalQuantity: item.quantity
+      });
+
+      // Record Movement
+      movementsList.push({
+        id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        transactionId: transactionId,
+        productId: item.productId,
+        productName: product.name,
+        type: 'restock',
+        quantity: item.quantity,
+        reason: 'Smart Notepad Purchase',
+        date: timestamp
+      });
+    }
+
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+
+    return c.json({ success: true, transactionId });
+
+  } catch (error) {
+    console.error("Batch purchase error:", error);
+    return c.json({ error: "Failed to process purchase" }, 500);
+  }
+});
+
+// Undo Transaction
+app.post("/make-server-29b58f9a/sales/undo", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const { transactionId } = await c.req.json();
+    if (!transactionId) return c.json({ error: "Transaction ID required" }, 400);
+
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    
+    // Find movements for this transaction
+    const txMovements = movementsList.filter((m: any) => m.transactionId === transactionId);
+    if (txMovements.length === 0) {
+      return c.json({ error: "Transaction not found or already undone" }, 404);
+    }
+
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const undoTimestamp = new Date().toISOString();
+
+    for (const mov of txMovements) {
+        // Only reverse sales for now
+        if (mov.type !== 'sale') continue; 
+
+        const product = productsList.find((p: any) => p.id === mov.productId);
+        if (product) {
+            const qtyToRestore = Math.abs(mov.quantity);
+            product.stock += qtyToRestore;
+            product.unitsSold = Math.max(0, (product.unitsSold || 0) - qtyToRestore);
+            // Revenue reversal approximation
+            product.revenue = Math.max(0, (product.revenue || 0) - (qtyToRestore * product.price)); 
+            
+            // Note: Batch restoration is complex (which batch?). 
+            // Simplified: Add to general stock or a "Restored" batch? 
+            // For now, just adding to stock is sufficient for simple inventory.
+            
+            // Log Undo Movement
+            movementsList.push({
+                id: `mov-undo-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                relatedTransactionId: transactionId,
+                productId: mov.productId,
+                productName: product.name,
+                type: 'correction',
+                quantity: qtyToRestore,
+                reason: `Undo Sale ${transactionId}`,
+                date: undoTimestamp
+            });
+        }
+    }
+
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+
+    console.log(`Transaction ${transactionId} undone for user ${user.email}`);
+    return c.json({ success: true });
+
+  } catch (error) {
+    console.error("Undo error:", error);
+    return c.json({ error: "Failed to undo transaction" }, 500);
+  }
+});
+
+// Adjust stock (manual adjustment for wastage, damaged, etc.)
+app.post("/make-server-29b58f9a/products/:id/adjust-stock", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const id = parseInt(c.req.param('id'));
+    const { quantity, type, reason, batchId } = await c.req.json();
+    // type: 'expired' | 'damaged' | 'missing' | 'correction'
+    // quantity: negative for reduction, positive for addition (usually negative for these types)
+
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    
+    const index = productsList.findIndex((p: any) => p.id === id);
+    if (index === -1) return c.json({ error: "Product not found" }, 404);
+    
+    const product = productsList[index];
+    
+    // Apply adjustment
+    product.stock += quantity;
+    if (product.stock < 0) product.stock = 0; // Prevent negative stock for simplicity
+    
+    // Adjust batch if specified or FIFO for reductions
+    if (quantity < 0 && product.batches && product.batches.length > 0) {
+        let remainingToDeduct = Math.abs(quantity);
+        
+        if (batchId) {
+            // Deduct from specific batch
+            const batch = product.batches.find((b: any) => b.id === batchId);
+            if (batch) {
+                batch.quantity = Math.max(0, batch.quantity - remainingToDeduct);
+            }
+        } else {
+             // FIFO
+            const sortedBatches = [...product.batches].sort((a: any, b: any) => {
+                if (!a.expiryDate) return 1;
+                if (!b.expiryDate) return -1;
+                return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+            });
+            
+            for (const batch of sortedBatches) {
+                if (remainingToDeduct <= 0) break;
+                const originalBatch = product.batches.find((b: any) => b.id === batch.id);
+                if (originalBatch && originalBatch.quantity > 0) {
+                    const take = Math.min(originalBatch.quantity, remainingToDeduct);
+                    originalBatch.quantity -= take;
+                    remainingToDeduct -= take;
+                }
+            }
+        }
+    }
+
+    // Record movement
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    
+    movementsList.push({
+        id: `mov-${Date.now()}`,
+        productId: id,
+        productName: product.name,
+        type: type || 'adjustment',
+        quantity: quantity,
+        reason: reason || type,
+        batchId: batchId,
+        date: new Date().toISOString()
+    });
+
+    // If wastage/expired/damaged, record to losses table as well for easier reporting
+    if (['expired', 'damaged', 'missing'].includes(type) && quantity < 0) {
+        const losses = await kv.get(getUserKey(user.id, 'losses')) || [];
+        const lossesList = Array.isArray(losses) ? losses : [];
+        lossesList.push({
+            id: `loss-${Date.now()}`,
+            productId: id,
+            productName: product.name,
+            quantity: Math.abs(quantity),
+            lossAmount: Math.abs(quantity) * (product.costPrice || 0),
+            reason: reason || type,
+            date: new Date().toISOString()
+        });
+        await kv.set(getUserKey(user.id, 'losses'), lossesList);
+    }
+    
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    
+    return c.json({ product });
+  } catch (error) {
+    console.error("Error adjusting stock:", error);
+    return c.json({ error: "Failed to adjust stock" }, 500);
+  }
+});
+
+// Get inventory movements (Audit Trail)
+app.get("/make-server-29b58f9a/inventory/movements/:productId", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const productId = parseInt(c.req.param('productId'));
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    // Filter by product ID
+    const productMovements = Array.isArray(movements) 
+        ? movements.filter((m: any) => m.productId === productId).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        : [];
+        
+    return c.json({ movements: productMovements });
+  } catch (error) {
+    console.error("Error fetching movements:", error);
+    return c.json({ error: "Failed to fetch movements" }, 500);
+  }
+});
+
+// Process expired products
+app.post("/make-server-29b58f9a/products/process-expired", async (c) => {
+  try {
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    
+    // Get existing losses
+    const losses = await kv.get(getUserKey(user.id, 'losses')) || [];
+    const lossesList = Array.isArray(losses) ? losses : [];
+
+    let processedCount = 0;
+    let totalLoss = 0;
+    let anyUpdates = false;
+    
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    productsList.forEach((product: any) => {
+      let productModified = false;
+      
+      // 1. Check Batches
+      if (product.batches && product.batches.length > 0) {
+        const activeBatches: any[] = [];
+        
+        for (const batch of product.batches) {
+          if (!batch.expiryDate) {
+            activeBatches.push(batch);
+            continue;
+          }
+          
+          const expiryDate = new Date(batch.expiryDate);
+          // Check if expired (strictly before today)
+          if (expiryDate < startOfToday) {
+            const quantity = batch.quantity;
+            
+            if (quantity > 0) {
+              const lossAmount = quantity * (product.costPrice || 0);
+              totalLoss += lossAmount;
+              processedCount += quantity;
+              
+              // Record loss
+              lossesList.push({
+                id: `loss-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                productId: product.id,
+                productName: product.name,
+                quantity: quantity,
+                lossAmount: lossAmount,
+                reason: 'Expired (Batch)',
+                batchNumber: batch.batchNumber,
+                expiryDate: batch.expiryDate,
+                date: new Date().toISOString(),
+              });
+              
+              // Reduce main stock
+              product.stock = Math.max(0, product.stock - quantity);
+              productModified = true;
+            }
+            // Batch is excluded from activeBatches, effectively removing it
+          } else {
+            activeBatches.push(batch);
+          }
+        }
+        
+        if (productModified) {
+          product.batches = activeBatches;
+        }
+      } 
+      // 2. Check Product Level Expiry (only if no batches or logic implies both?)
+      // If we processed batches, we shouldn't process product level expiry again for the same stock
+      // But if product has no batches and has expiryDate
+      else if (product.expiryDate && (!product.batches || product.batches.length === 0)) {
+        const expiryDate = new Date(product.expiryDate);
+        
+        if (expiryDate < startOfToday && product.stock > 0) {
+          const quantity = product.stock;
+          const lossAmount = quantity * (product.costPrice || 0);
+          totalLoss += lossAmount;
+          processedCount += quantity;
+          
+          lossesList.push({
+            id: `loss-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            productId: product.id,
+            productName: product.name,
+            quantity: quantity,
+            lossAmount: lossAmount,
+            reason: 'Expired',
+            expiryDate: product.expiryDate,
+            date: new Date().toISOString(),
+          });
+          
+          product.stock = 0;
+          // product.expiryDate = null; // Optional: clear expiry? Keep it for record?
+          productModified = true;
+        }
+      }
+      
+      if (productModified) {
+        product.updatedAt = new Date();
+        anyUpdates = true;
+      }
+    });
+
+    if (anyUpdates) {
+      await kv.set(getUserKey(user.id, 'products'), productsList);
+      await kv.set(getUserKey(user.id, 'losses'), lossesList);
+      console.log(`Processed expiry for user ${user.email}: ${processedCount} items removed, ₹${totalLoss} loss recorded`);
+    }
+
+    return c.json({ processedCount, totalLoss });
+  } catch (error) {
+    console.error("Error processing expiry:", error);
+    return c.json({ error: "Failed to process expiry", details: String(error) }, 500);
+  }
+});
+
+// Get losses
+app.get("/make-server-29b58f9a/losses", async (c) => {
+  try {
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const losses = await kv.get(getUserKey(user.id, 'losses'));
+    return c.json({ losses: losses || [] });
+  } catch (error) {
+    console.error("Error fetching losses:", error);
+    return c.json({ error: "Failed to fetch losses", details: String(error) }, 500);
   }
 });
 
@@ -586,6 +1131,88 @@ app.put("/make-server-29b58f9a/orders/:id/status", async (c) => {
 });
 
 // ========================================
+// PURCHASES ENDPOINTS
+// ========================================
+
+app.get("/make-server-29b58f9a/purchases", async (c) => {
+  try {
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const purchases = await kv.get(getUserKey(user.id, 'purchases'));
+    return c.json({ purchases: purchases || [] });
+  } catch (error) {
+    console.error("Error fetching purchases:", error);
+    return c.json({ error: "Failed to fetch purchases", details: String(error) }, 500);
+  }
+});
+
+app.post("/make-server-29b58f9a/purchases", async (c) => {
+  try {
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const purchase = await c.req.json();
+    const purchases = await kv.get(getUserKey(user.id, 'purchases'));
+    const purchasesList = Array.isArray(purchases) ? purchases : [];
+    
+    // Add purchase to list
+    purchasesList.push(purchase);
+    await kv.set(getUserKey(user.id, 'purchases'), purchasesList);
+    
+    // Also update product stock for each item in the purchase
+    if (purchase.items && Array.isArray(purchase.items)) {
+      const products = await kv.get(getUserKey(user.id, 'products'));
+      const productsList = Array.isArray(products) ? products : [];
+      let productsUpdated = false;
+      
+      for (const item of purchase.items) {
+        if (!item.productId) continue;
+        
+        const productIndex = productsList.findIndex((p: any) => p.id === item.productId);
+        if (productIndex !== -1) {
+          // Increase stock
+          const product = productsList[productIndex];
+          const oldStock = product.stock || 0;
+          const addedQty = item.quantity || 0;
+          const newStock = oldStock + addedQty;
+          
+          product.stock = newStock;
+          
+          // Update cost price if provided (weighted average)
+          if (item.costPrice && item.costPrice > 0) {
+             const oldCost = product.costPrice || 0;
+             const totalValue = (oldStock * oldCost) + (addedQty * item.costPrice);
+             // Avoid division by zero if newStock is 0 (shouldn't happen here but safe)
+             const newCost = newStock > 0 ? totalValue / newStock : item.costPrice;
+             product.costPrice = parseFloat(newCost.toFixed(2));
+          }
+          
+          product.updatedAt = new Date().toISOString();
+          productsUpdated = true;
+        }
+      }
+      
+      if (productsUpdated) {
+        await kv.set(getUserKey(user.id, 'products'), productsList);
+      }
+    }
+    
+    console.log('Purchase added:', purchase.id, 'for user:', user.email);
+    return c.json({ purchase });
+  } catch (error) {
+    console.error("Error adding purchase:", error);
+    return c.json({ error: "Failed to add purchase", details: String(error) }, 500);
+  }
+});
+
+// ========================================
 // REVENUE SOURCES ENDPOINTS
 // ========================================
 
@@ -637,6 +1264,74 @@ app.put("/make-server-29b58f9a/revenue-sources/:id", async (c) => {
 // ========================================
 // SHOP SETTINGS ENDPOINTS
 // ========================================
+
+// Upload shop logo
+app.post("/make-server-29b58f9a/shop-settings/logo", async (c) => {
+  try {
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const body = await c.req.parseBody();
+    const file = body['file'];
+
+    if (!file || !(file instanceof File)) {
+      return c.json({ error: "No file uploaded" }, 400);
+    }
+
+    const bucketName = 'make-29b58f9a-shop-assets';
+    
+    // Ensure bucket exists
+    const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+    const bucketExists = buckets?.some(bucket => bucket.name === bucketName);
+    if (!bucketExists) {
+      await supabaseAdmin.storage.createBucket(bucketName, { public: false });
+    }
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${user.id}/logo-${Date.now()}.${fileExt}`;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const fileData = new Uint8Array(arrayBuffer);
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from(bucketName)
+      .upload(fileName, fileData, {
+        contentType: file.type,
+        upsert: true
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    // Create signed URL valid for 10 years
+    const { data: signedUrlData, error: signedUrlError } = await supabaseAdmin.storage
+      .from(bucketName)
+      .createSignedUrl(fileName, 315360000);
+
+    if (signedUrlError) {
+      throw signedUrlError;
+    }
+
+    // Update shop settings with the new logo URL
+    const existingSettings = await kv.get(getUserKey(user.id, 'shopSettings')) || {};
+    const updatedSettings = {
+      ...existingSettings,
+      shopLogoUrl: signedUrlData.signedUrl,
+      updatedAt: new Date().toISOString(),
+    };
+    await kv.set(getUserKey(user.id, 'shopSettings'), updatedSettings);
+
+    console.log('Shop logo uploaded for user:', user.email);
+    return c.json({ success: true, url: signedUrlData.signedUrl });
+  } catch (error) {
+    console.error("Error uploading logo:", error);
+    return c.json({ error: "Failed to upload logo", details: String(error) }, 500);
+  }
+});
 
 // Get shop settings
 app.get("/make-server-29b58f9a/shop-settings", async (c) => {
@@ -1918,7 +2613,7 @@ app.post("/make-server-29b58f9a/auth/verify-otp-and-reset", async (c) => {
       await kv.del(`password-reset-otp:${email}`);
     }, 60000); // Delete after 1 minute
     
-    console.log(`Password reset successful for: ${email}`);
+    console.log('Password reset successful for: ${email}');
     
     return c.json({ 
       success: true, 
@@ -1927,6 +2622,213 @@ app.post("/make-server-29b58f9a/auth/verify-otp-and-reset", async (c) => {
   } catch (error) {
     console.error("Error verifying OTP and resetting password:", error);
     return c.json({ error: "Failed to reset password", details: String(error) }, 500);
+  }
+});
+
+// ========================================
+// DASHBOARD INTELLIGENCE ENDPOINTS
+// ========================================
+
+app.get("/make-server-29b58f9a/dashboard/daily-missions", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const missions = await dashboardService.getDailyMissions(user.id);
+    return c.json({ missions });
+  } catch (error) {
+    console.error("Error fetching daily missions:", error);
+    return c.json({ error: "Failed to fetch missions" }, 500);
+  }
+});
+
+app.get("/make-server-29b58f9a/dashboard/store-health", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const health = await dashboardService.getStoreHealth(user.id);
+    return c.json({ health });
+  } catch (error) {
+    console.error("Error fetching store health:", error);
+    return c.json({ error: "Failed to fetch store health" }, 500);
+  }
+});
+
+app.get("/make-server-29b58f9a/dashboard/end-of-day-summary", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const summary = await dashboardService.getEndOfDaySummary(user.id);
+    return c.json({ summary });
+  } catch (error) {
+    console.error("Error fetching end of day summary:", error);
+    return c.json({ error: "Failed to fetch summary" }, 500);
+  }
+});
+
+// ========================================
+// AI ENDPOINTS
+// ========================================
+
+app.post("/make-server-29b58f9a/ai/parse-sales-note", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    
+    const { note, products } = await c.req.json();
+    
+    // If products not passed, fetch from DB
+    let productsList = products;
+    if (!productsList || !Array.isArray(productsList)) {
+        const storedProducts = await kv.get(getUserKey(user.id, 'products'));
+        productsList = Array.isArray(storedProducts) ? storedProducts : [];
+    }
+
+    const parsed = await parseSalesNote(note, productsList);
+    return c.json(parsed);
+  } catch (error) {
+    console.error("AI Parse Error:", error);
+    return c.json({ error: "AI Parsing Failed", details: String(error) }, 500);
+  }
+});
+
+app.post("/make-server-29b58f9a/ai/parse-purchase-note", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    
+    const { note, products } = await c.req.json();
+    
+    // If products not passed, fetch from DB
+    let productsList = products;
+    if (!productsList || !Array.isArray(productsList)) {
+        const storedProducts = await kv.get(getUserKey(user.id, 'products'));
+        productsList = Array.isArray(storedProducts) ? storedProducts : [];
+    }
+
+    const parsed = await parsePurchaseNote(note, productsList);
+    return c.json(parsed);
+  } catch (error) {
+    console.error("AI Purchase Parse Error:", error);
+    return c.json({ error: "AI Parsing Failed", details: String(error) }, 500);
+  }
+});
+
+// ========================================
+// PURCHASES ENDPOINTS
+// ========================================
+
+app.get("/make-server-29b58f9a/purchases", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const purchases = await kv.get(getUserKey(user.id, 'purchases'));
+    return c.json({ purchases: purchases || [] });
+  } catch (error) {
+    console.error("Error fetching purchases:", error);
+    return c.json({ error: "Failed to fetch purchases", details: String(error) }, 500);
+  }
+});
+
+app.post("/make-server-29b58f9a/purchases", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const purchase = await c.req.json();
+    
+    // 1. Save Purchase
+    const purchases = await kv.get(getUserKey(user.id, 'purchases'));
+    const purchasesList = Array.isArray(purchases) ? purchases : [];
+    purchasesList.push(purchase);
+    await kv.set(getUserKey(user.id, 'purchases'), purchasesList);
+
+    // 2. Update Inventory (Stock & Weighted Average Cost)
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    let inventoryUpdated = false;
+
+    if (purchase.items && Array.isArray(purchase.items)) {
+        purchase.items.forEach((item: any) => {
+            if (item.productId) {
+                const productIndex = productsList.findIndex((p: any) => p.id === item.productId);
+                if (productIndex !== -1) {
+                    const product = productsList[productIndex];
+                    const currentStock = product.stock || 0;
+                    const currentCost = product.costPrice || 0;
+                    const newQty = item.quantity || 0;
+                    const newCost = item.costPrice || 0;
+                    
+                    // WAC Calculation
+                    let avgCost = currentCost;
+                    if (currentStock + newQty > 0) {
+                         avgCost = ((currentStock * currentCost) + (newQty * newCost)) / (currentStock + newQty);
+                    }
+                    
+                    productsList[productIndex].stock = currentStock + newQty;
+                    productsList[productIndex].costPrice = parseFloat(avgCost.toFixed(2));
+                    productsList[productIndex].updatedAt = new Date().toISOString();
+                    inventoryUpdated = true;
+                    
+                    console.log(`Updated stock for ${product.name}: ${currentStock} -> ${productsList[productIndex].stock}`);
+                }
+            }
+        });
+        
+        if (inventoryUpdated) {
+            await kv.set(getUserKey(user.id, 'products'), productsList);
+        }
+    }
+    
+    console.log('Purchase added:', purchase.id, 'for user:', user.email);
+    return c.json({ purchase });
+  } catch (error) {
+    console.error("Error adding purchase:", error);
+    return c.json({ error: "Failed to add purchase", details: String(error) }, 500);
+  }
+});
+
+// ========================================
+// ANALYTICS & AI INSIGHTS (ARALI BRAIN)
+// ========================================
+
+app.get("/make-server-29b58f9a/analytics/ai-insights", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const data = await aiInsightsEngine.generateInsights(user.id);
+    return c.json(data);
+  } catch (error) {
+    console.error("Error generating insights:", error);
+    return c.json({ error: "Failed to generate insights" }, 500);
+  }
+});
+
+app.post("/make-server-29b58f9a/analytics/ai-insights/feedback", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const { insightId, status } = await c.req.json();
+    if (!insightId || !status) return c.json({ error: "Missing fields" }, 400);
+
+    await aiInsightsEngine.recordFeedback(user.id, insightId, status);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error recording feedback:", error);
+    return c.json({ error: "Failed to record feedback" }, 500);
   }
 });
 

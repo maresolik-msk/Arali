@@ -5,10 +5,14 @@ const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-
 
 const supabaseUrl = `https://${projectId}.supabase.co`;
 
+import { PricingPlan, DEFAULT_PLAN } from '../constants/pricing';
+
 export interface User {
   id: string;
   email: string;
   name: string;
+  plan: PricingPlan;
+  hasSelectedPlan?: boolean;
 }
 
 export interface AuthState {
@@ -102,6 +106,8 @@ export async function signIn(email: string, password: string): Promise<AuthState
     id: data.user.id,
     email: data.user.email!,
     name: data.user.user_metadata.name || data.user.email!.split('@')[0],
+    plan: (data.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
+    hasSelectedPlan: !!data.user.user_metadata.plan_selected,
   };
 
   // Store auth state
@@ -157,6 +163,8 @@ export async function getCurrentSession(): Promise<AuthState> {
         id: refreshData.session.user.id,
         email: refreshData.session.user.email!,
         name: refreshData.session.user.user_metadata.name || refreshData.session.user.email!.split('@')[0],
+        plan: (refreshData.session.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
+        hasSelectedPlan: !!refreshData.session.user.user_metadata.plan_selected,
       };
 
       // Update localStorage with fresh token
@@ -226,6 +234,8 @@ export async function getCurrentSession(): Promise<AuthState> {
       id: data.session.user.id,
       email: data.session.user.email!,
       name: data.session.user.user_metadata.name || data.session.user.email!.split('@')[0],
+      plan: (data.session.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
+      hasSelectedPlan: !!data.session.user.user_metadata.plan_selected,
     };
 
     // Update localStorage with token

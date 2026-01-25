@@ -1,21 +1,86 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { LogIn, UserPlus, Mail, Lock, User, Info, KeyRound } from 'lucide-react';
-import { Card } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
+import { Button } from '../components/ui/button';
+import { Label } from '../components/ui/label';
+import { KeyRound, Mail, Lock, User } from 'lucide-react';
+import svgPaths from "../../imports/svg-ga16o7ulxf";
+import { cn } from '../components/ui/utils';
+import { motion, AnimatePresence } from 'motion/react';
+
+function MdiLightEmail() {
+  return (
+    <div className="relative shrink-0 size-[24px]" data-name="mdi-light:email">
+      <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 24 24">
+        <g id="mdi-light:email">
+          <path d={svgPaths.p22cfae00} fill="#062844" id="Vector" />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function MaterialSymbolsLightLock() {
+  return (
+    <div className="relative shrink-0 size-[24px]" data-name="material-symbols-light:lock">
+      <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 24 24">
+        <g id="material-symbols-light:lock">
+          <path d={svgPaths.p5970600} fill="#082B48" id="Vector" />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function BasilEyeSolid({ className, onClick }: { className?: string, onClick?: () => void }) {
+  return (
+    <div className={cn("relative shrink-0 size-[24px] cursor-pointer", className)} onClick={onClick} data-name="basil:eye-solid">
+      <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 24 24">
+        <g id="basil:eye-solid">
+          <path d={svgPaths.p86e1070} fill="#766F71" id="Vector" />
+          <path clipRule="evenodd" d={svgPaths.p3fb81550} fill="#766F71" fillRule="evenodd" id="Vector_2" />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function LsiconRightOutline() {
+  return (
+    <div className="relative shrink-0 size-[24px]" data-name="lsicon:right-outline">
+      <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 24 24">
+        <g id="lsicon:right-outline">
+          <path d="M9 6.75L14.25 12L9 17.25" id="Vector" stroke="white" strokeWidth="1.5" />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function Group() {
+  return (
+    <div className="h-[53.963px] relative shrink-0 w-[62.21px]">
+      <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 62.2099 53.9629">
+        <g id="Group 42">
+          <path d={svgPaths.p270b3880} fill="white" id="Vector" />
+          <path d={svgPaths.p19496a80} fill="white" id="Vector_2" />
+        </g>
+      </svg>
+    </div>
+  );
+}
 
 export function Login() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { signIn, signUp, requestPasswordResetOTP, verifyOTPAndResetPassword } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  
+  // Forgot Password State
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [isOTPVerifyOpen, setIsOTPVerifyOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -52,10 +117,8 @@ export function Login() {
 
     try {
       if (isSignUp) {
-        console.log('Attempting to sign up:', formData.email);
         await signUp(formData.email, formData.password, formData.name);
       } else {
-        console.log('Attempting to sign in:', formData.email);
         await signIn(formData.email, formData.password);
       }
       navigate('/dashboard');
@@ -63,11 +126,9 @@ export function Login() {
       console.error('Authentication error:', error);
       const errorMessage = error.message || 'Authentication failed';
       
-      // Provide helpful error messages
       if (errorMessage.includes('Invalid login credentials')) {
-        toast.error('Invalid email or password. Please create an account if you\'re a new user.', {
-          duration: 5000,
-          description: 'Tip: Click "Create Account" below to sign up'
+        toast.error('Invalid email or password.', {
+          description: 'Please check your credentials and try again.'
         });
       } else if (errorMessage.includes('already exists')) {
         toast.error('An account with this email already exists. Please sign in instead.');
@@ -82,25 +143,18 @@ export function Login() {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validation
     if (!resetEmail) {
       toast.error('Please enter your email');
       return;
     }
-
     setIsLoading(true);
-
     try {
       await requestPasswordResetOTP(resetEmail);
-      toast.success('Password reset code sent! Check your email for a 6-digit code.');
+      toast.success('Password reset code sent!');
       setIsForgotPasswordOpen(false);
       setIsOTPVerifyOpen(true);
     } catch (error: any) {
-      const errorMessage = error.message || 'Password reset failed';
-      toast.error(errorMessage, {
-        duration: 5000,
-      });
+      toast.error(error.message || 'Password reset failed');
     } finally {
       setIsLoading(false);
     }
@@ -108,341 +162,222 @@ export function Login() {
 
   const handleVerifyOTPAndReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validation
     if (!otp || !newPassword || !confirmPassword) {
       toast.error('Please fill in all fields');
       return;
     }
-
-    if (newPassword.length < 6) {
-      toast.error('Password must be at least 6 characters');
-      return;
-    }
-
     if (newPassword !== confirmPassword) {
       toast.error('Passwords do not match');
       return;
     }
-
     setIsLoading(true);
-
     try {
       await verifyOTPAndResetPassword(resetEmail, otp, newPassword);
-      toast.success('Password reset successful! You can now sign in with your new password.');
+      toast.success('Password reset successful!');
       setIsOTPVerifyOpen(false);
       setResetEmail('');
       setOtp('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error: any) {
-      const errorMessage = error.message || 'Password reset failed';
-      toast.error(errorMessage);
+      toast.error(error.message || 'Password reset failed');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0F4C81]/5 via-white to-[#0F4C81]/10 flex items-center justify-center p-4">
-      {/* Background decorative elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#0F4C81]/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-[#0F4C81]/5 rounded-full blur-3xl" />
+    <div className="relative size-full min-h-screen bg-[#061B2E]" style={{ backgroundImage: "url('data:image/svg+xml;utf8,<svg viewBox=\\\'0 0 393 852\\\' xmlns=\\\'http://www.w3.org/2000/svg\\\' preserveAspectRatio=\\\'none\\\'><rect x=\\\'0\\\' y=\\\'0\\\' height=\\\'100%\\\' width=\\\'100%\\\' fill=\\\'url(%23grad)\\\' opacity=\\\'1\\\'/><defs><radialGradient id=\\\'grad\\\' gradientUnits=\\\'userSpaceOnUse\\\' cx=\\\'0\\\' cy=\\\'0\\\' r=\\\'10\\\' gradientTransform=\\\'matrix(1.5 97 -28.933 0.44742 197 189)\\\'><stop stop-color=\\\'rgba(16,76,129,1)\\\' offset=\\\'0\\\'/><stop stop-color=\\\'rgba(10,46,78,1)\\\' offset=\\\'0.5\\\'/><stop stop-color=\\\'rgba(7,31,53,1)\\\' offset=\\\'0.75\\\'/><stop stop-color=\\\'rgba(3,16,27,1)\\\' offset=\\\'1\\\'/></radialGradient></defs></svg>')" }}>
+      
+      {/* Back Button */}
+      <button 
+        onClick={() => navigate('/')}
+        className="absolute top-6 left-6 z-20 flex items-center gap-1 text-white/60 hover:text-white transition-colors"
+      >
+        <div className="rotate-180 transform scale-75">
+          <LsiconRightOutline />
+        </div>
+        <span className="font-sans text-[14px] font-medium">Back</span>
+      </button>
+
+      {/* Logo Section */}
+      <div className="absolute top-[101px] left-1/2 -translate-x-1/2 w-[197px] flex flex-col items-center gap-[8px]">
+        <div className="flex gap-[12px] items-center justify-center w-full">
+          <Group />
+          <p className="font-sans leading-[normal] text-[54px] text-center text-white">Arali</p>
+        </div>
+        <p className="font-sans text-[14px] leading-[1.5] text-[rgba(255,255,255,0.56)] tracking-[2.1px] text-center w-full whitespace-pre-wrap">
+          Save little, Save more
+        </p>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-md relative z-10"
-      >
-        {/* Logo/Brand */}
-        <div className="text-center mb-8">
-          <motion.h1 
-            className="text-[#0F4C81] mb-2"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            Arali
-          </motion.h1>
-          <p className="text-muted-foreground">
-            {isSignUp ? 'Create your account' : 'Welcome back'}
-          </p>
-        </div>
+      {/* Main Card */}
+      <div className="absolute top-[235px] left-1/2 -translate-x-1/2 w-[360px] bg-[rgba(255,255,255,0.9)] backdrop-blur-md rounded-[12px] p-[24px] flex flex-col gap-[18px]">
+        <p className="font-sans text-[24px] leading-[1.5] text-[#0b2a45]">
+          {isSignUp ? 'Create Account' : 'Welcome back'}
+        </p>
+        
+        <form onSubmit={handleSubmit} className="flex flex-col gap-[24px] w-full">
+          <div className="flex flex-col gap-[8px] w-full">
+            <div className="flex flex-col gap-[16px] w-full">
+              
+              {/* Name Input (Sign Up only) */}
+              <AnimatePresence>
+                {isSignUp && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="relative rounded-[8px] w-full"
+                  >
+                    <div aria-hidden="true" className="absolute border-[0.6px] border-[rgba(0,0,0,0.5)] inset-0 pointer-events-none rounded-[8px]" />
+                    <div className="flex items-center p-[12px] gap-[6px]">
+                       <User className="size-[24px] text-[#062844]" />
+                       <input
+                        type="text"
+                        placeholder="Full Name"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className="w-full bg-transparent border-none outline-none text-[14px] text-[#000000] placeholder-[rgba(0,0,0,0.5)] font-sans"
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-        {/* Login Card */}
-        <Card className="backdrop-blur-xl bg-white/70 border border-[#0F4C81]/20 shadow-2xl">
-          <div className="p-8">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {isSignUp && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="space-y-2"
-                >
-                  <Label htmlFor="name">Full Name</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
-                    <Input
-                      id="name"
-                      type="text"
-                      placeholder="John Doe"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="pl-10 bg-white/50 border-[#0F4C81]/20 focus:border-[#0F4C81]/40"
-                    />
-                  </div>
-                </motion.div>
-              )}
-
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
-                  <Input
-                    id="email"
+              {/* Email Input */}
+              <div className="relative rounded-[8px] w-full">
+                <div aria-hidden="true" className="absolute border-[0.6px] border-[rgba(0,0,0,0.5)] inset-0 pointer-events-none rounded-[8px]" />
+                <div className="flex items-center p-[12px] gap-[6px]">
+                  <MdiLightEmail />
+                  <input
                     type="email"
-                    placeholder="you@example.com"
+                    placeholder="Enter Email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="pl-10 bg-white/50 border-[#0F4C81]/20 focus:border-[#0F4C81]/40"
+                    className="w-full bg-transparent border-none outline-none text-[14px] text-[#000000] placeholder-[rgba(0,0,0,0.5)] font-sans"
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="pl-10 bg-white/50 border-[#0F4C81]/20 focus:border-[#0F4C81]/40"
-                  />
+              {/* Password Input */}
+              <div className="relative rounded-[8px] w-full">
+                <div aria-hidden="true" className="absolute border-[0.6px] border-[rgba(0,0,0,0.5)] inset-0 pointer-events-none rounded-[8px]" />
+                <div className="flex items-center justify-between p-[12px] w-full">
+                  <div className="flex items-center gap-[6px] w-full">
+                    <MaterialSymbolsLightLock />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="w-full bg-transparent border-none outline-none text-[14px] text-[#000000] placeholder-[rgba(0,0,0,0.5)] font-sans"
+                    />
+                  </div>
+                  <BasilEyeSolid className="cursor-pointer hover:opacity-70 transition-opacity" onClick={() => setShowPassword(!showPassword)} />
                 </div>
-                <p className="text-muted-foreground text-xs">
-                  At least 6 characters
-                </p>
               </div>
-
-              <Button
-                type="submit"
-                className="w-full bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Processing...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    {isSignUp ? (
-                      <>
-                        <UserPlus className="w-5 h-5" />
-                        Create Account
-                      </>
-                    ) : (
-                      <>
-                        <LogIn className="w-5 h-5" />
-                        Sign In
-                      </>
-                    )}
-                  </span>
-                )}
-              </Button>
-
-
-            </form>
-
-            {/* Toggle Sign In/Sign Up */}
-            <div className="mt-6 text-center">
-              <button
-                type="button"
-                onClick={() => setIsSignUp(!isSignUp)}
-                className="text-[#0F4C81] hover:underline"
-              >
-                {isSignUp ? (
-                  'Already have an account? Sign in'
-                ) : (
-                  "Don't have an account? Sign up"
-                )}
-              </button>
             </div>
 
-            {/* Forgot Password Link */}
-            <div className="mt-2 text-center">
-              <button
-                type="button"
-                onClick={() => setIsForgotPasswordOpen(true)}
-                className="text-[#0F4C81] hover:underline"
-              >
-                Forgot password?
-              </button>
+            {/* Helper Text and Forgot Password */}
+            <div className="flex items-center justify-between text-[12px] text-[#104f86] w-full">
+              <p className="font-sans">At least 6 characters</p>
+              {!isSignUp && (
+                <button type="button" onClick={() => setIsForgotPasswordOpen(true)} className="font-medium underline hover:text-[#0b355a]">
+                  Forgot Password?
+                </button>
+              )}
             </div>
           </div>
-        </Card>
-      </motion.div>
 
-      {/* Forgot Password Dialog */}
+          {/* Sign In Button */}
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="bg-[#0f4c81] h-[54px] rounded-[8px] w-full flex items-center justify-center hover:bg-[#0b355a] transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            <div className="flex items-center justify-center gap-[10px] px-[16px]">
+              <span className="font-sans font-medium text-[16px] text-white">
+                {isLoading ? 'Processing...' : (isSignUp ? 'Register' : 'Sign in')}
+              </span>
+              {!isLoading && <LsiconRightOutline />}
+            </div>
+          </button>
+
+          {/* Toggle Link */}
+          <div className="flex flex-col items-center gap-[8px] w-full text-center">
+            <p className="font-sans text-[14px] text-black">
+              {isSignUp ? 'Already have an account?' : 'Don’t have an account?'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="font-sans font-medium text-[16px] text-[#0b355a] underline hover:text-[#0f4c81]"
+            >
+              {isSignUp ? 'Sign in' : 'Register'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Forgot Password Dialogs */}
       <Dialog open={isForgotPasswordOpen} onOpenChange={setIsForgotPasswordOpen}>
-        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="forgot-password-description">
+        <DialogContent className="sm:max-w-[425px] bg-white border border-[#0F4C81]/20 shadow-2xl">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <KeyRound className="w-5 h-5" />
               Forgot Password
             </DialogTitle>
-            <DialogDescription id="forgot-password-description">
+            <DialogDescription>
               Enter your email address to receive a 6-digit password reset code.
             </DialogDescription>
           </DialogHeader>
-          
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="reset-email" className="text-[#0F4C81]">Email</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
-                <Input
-                  id="reset-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={resetEmail}
-                  onChange={(e) => setResetEmail(e.target.value)}
-                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                We'll send you a 6-digit code to reset your password
-              </p>
+              <Label htmlFor="reset-email">Email</Label>
+              <Input
+                id="reset-email"
+                type="email"
+                placeholder="you@example.com"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+              />
             </div>
-
             <div className="flex gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
-                onClick={() => {
-                  setIsForgotPasswordOpen(false);
-                  setResetEmail('');
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/30"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Sending...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Mail className="w-4 h-4" />
-                    Send Code
-                  </span>
-                )}
-              </Button>
+              <Button type="button" variant="outline" className="flex-1" onClick={() => setIsForgotPasswordOpen(false)}>Cancel</Button>
+              <Button type="submit" className="flex-1 bg-[#0F4C81]" disabled={isLoading}>Send Code</Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* OTP Verify Dialog */}
       <Dialog open={isOTPVerifyOpen} onOpenChange={setIsOTPVerifyOpen}>
-        <DialogContent className="sm:max-w-[425px] bg-white/95 backdrop-blur-xl border border-[#0F4C81]/20 shadow-2xl" aria-describedby="otp-verify-description">
+        <DialogContent className="sm:max-w-[425px] bg-white border border-[#0F4C81]/20 shadow-2xl">
           <DialogHeader>
             <DialogTitle className="text-[#0F4C81] flex items-center gap-2">
               <Lock className="w-5 h-5" />
               Reset Password
             </DialogTitle>
-            <DialogDescription id="otp-verify-description">
+            <DialogDescription>
               Enter the 6-digit code sent to {resetEmail}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleVerifyOTPAndReset} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="otp" className="text-[#0F4C81]">OTP</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
-                <Input
-                  id="otp"
-                  type="text"
-                  placeholder="123456"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-                />
-              </div>
+              <Label htmlFor="otp">OTP</Label>
+              <Input id="otp" value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="123456" />
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="newPassword" className="text-[#0F4C81]">New Password</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
-                <Input
-                  id="newPassword"
-                  type="password"
-                  placeholder="••••••••"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                At least 6 characters
-              </p>
+              <Label htmlFor="newPass">New Password</Label>
+              <Input id="newPass" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="•��••••••" />
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="text-[#0F4C81]">Confirm Password</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/50" />
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="pl-10 h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-                />
-              </div>
+              <Label htmlFor="confirmPass">Confirm Password</Label>
+              <Input id="confirmPass" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" />
             </div>
-
             <div className="flex gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1 border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
-                onClick={() => setIsOTPVerifyOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/30"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Verifying...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <KeyRound className="w-4 h-4" />
-                    Reset Password
-                  </span>
-                )}
-              </Button>
+              <Button type="button" variant="outline" className="flex-1" onClick={() => setIsOTPVerifyOpen(false)}>Cancel</Button>
+              <Button type="submit" className="flex-1 bg-[#0F4C81]" disabled={isLoading}>Reset Password</Button>
             </div>
           </form>
         </DialogContent>

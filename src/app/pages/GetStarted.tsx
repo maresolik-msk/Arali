@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Button } from '../components/ui/button';
 import { Check, ArrowRight } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 const fadeInUp = {
   initial: { opacity: 0, y: 20 },

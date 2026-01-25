@@ -37,9 +37,45 @@ export interface Order {
   items: OrderItem[];
   totalAmount: number;
   status: 'Completed' | 'Processing' | 'Pending' | 'Cancelled';
+  paymentBreakup?: PaymentMethod[]; // New field for split payments
   createdAt: Date;
   updatedAt: Date;
   notes?: string;
+}
+
+export interface PaymentMethod {
+  method: 'CASH' | 'UPI' | 'CARD' | 'CREDIT';
+  amount: number;
+}
+
+export interface Invoice {
+  id: string;
+  orderId: string;
+  invoiceNumber: string;
+  type: 'SIMPLE' | 'GST';
+  subtotal: number;
+  tax: number;
+  total: number;
+  paymentBreakup: PaymentMethod[];
+  createdAt: string;
+}
+
+export interface HeldBill {
+  id: string;
+  items: OrderItem[];
+  customerName?: string;
+  note?: string;
+  totalAmount: number;
+  createdAt: string;
+}
+
+export interface POSAuditLog {
+  id: string;
+  orderId?: string;
+  action: 'CANCEL_SALE' | 'HOLD_BILL' | 'VOID_ITEM';
+  reason: string;
+  performedBy: string;
+  createdAt: string;
 }
 
 export interface OrderItem {
@@ -48,6 +84,25 @@ export interface OrderItem {
   quantity: number;
   price: number;
   subtotal: number;
+}
+
+export interface PurchaseItem {
+  productId: number | null; // Null if new product
+  productName: string;
+  quantity: number;
+  unit: string;
+  costPrice: number;
+  totalCost: number;
+}
+
+export interface Purchase {
+  id: string;
+  vendorId?: number;
+  vendorName?: string;
+  items: PurchaseItem[];
+  totalAmount: number;
+  createdAt: Date | string;
+  notes?: string;
 }
 
 export interface Customer {
@@ -112,6 +167,18 @@ export interface ExpiringProductAlert {
   stock: number;
   category: string;
   status: 'expired' | 'expiring_soon';
+}
+
+export interface Loss {
+  id: string;
+  productId: number;
+  productName: string;
+  quantity: number;
+  lossAmount: number;
+  reason: string;
+  batchNumber?: string;
+  expiryDate?: string;
+  date: string;
 }
 
 export interface Notification {
@@ -810,6 +877,84 @@ export const calculateDashboardMetrics = (
     customersTrend: 'up',
   };
 };
+
+export interface PriorityCardData {
+  id: string;
+  type: 'critical' | 'warning' | 'opportunity';
+  title: string;
+  description: string;
+  actionLabel: string;
+  impact?: string;
+  metric?: string;
+  confidence?: number;
+}
+
+export const calculateRevenueAtRisk = (products: Product[]): number => {
+  const expiringValue = getExpiringProducts(products, 7).reduce((sum, p) => {
+    const product = products.find(prod => prod.id === p.productId);
+    return sum + ((product?.sellingPrice || 0) * p.stock);
+  }, 0);
+  
+  // Add potential lost sales from low stock items (assuming avg 2 units/day * 3 days lost)
+  const lowStockValue = getLowStockProducts(products).reduce((sum, p) => {
+     const product = products.find(prod => prod.id === p.productId);
+     return sum + ((product?.sellingPrice || 0) * 6); 
+  }, 0);
+
+  return expiringValue + lowStockValue;
+};
+
+export const generatePriorityCards = (products: Product[]): PriorityCardData[] => {
+  const cards: PriorityCardData[] = [];
+  
+  // 1. Expiry Check (Critical)
+  const expiring = getExpiringProducts(products, 5);
+  if (expiring.length > 0) {
+    const totalValue = expiring.reduce((sum, p) => {
+       const product = products.find(prod => prod.id === p.productId);
+       return sum + ((product?.sellingPrice || 0) * p.stock);
+    }, 0);
+
+    cards.push({
+      id: 'expiry-1',
+      type: 'critical',
+      title: `${expiring.length} items expiring soon`,
+      description: `Potential loss of ₹${totalValue.toLocaleString('en-IN')}. Discount now to recover costs.`,
+      actionLabel: 'Apply 20% Discount',
+      impact: 'Recover Cost',
+      metric: `₹${totalValue} Risk`
+    });
+  }
+
+  // 2. Low Stock (Warning)
+  const lowStock = getLowStockProducts(products);
+  if (lowStock.length > 0) {
+    const topLowStock = lowStock[0]; // Simplified for demo
+    cards.push({
+      id: 'stock-1',
+      type: 'warning',
+      title: `Stockout risk: ${topLowStock.productName}`,
+      description: `Only ${topLowStock.currentStock} units left. Demand is steady.`,
+      actionLabel: 'Reorder Now',
+      impact: 'Prevent Loss',
+      metric: '< 2 days left'
+    });
+  }
+
+  // 3. Sales Spike (Opportunity) - Mocked logic
+  cards.push({
+    id: 'opp-1',
+    type: 'opportunity',
+    title: 'Sales Spike: Organic Coffee',
+    description: 'Sales up 40% this week. Consider increasing next order.',
+    actionLabel: 'Adjust Order',
+    impact: '+₹4,500 Revenue',
+    metric: '+40% Demand'
+  });
+
+  return cards;
+};
+
 
 // CRUD Operations
 

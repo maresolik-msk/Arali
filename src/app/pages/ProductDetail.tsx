@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import { motion } from 'motion/react';
 import { ArrowLeft, Package, TrendingUp, AlertCircle, Calendar, DollarSign, Edit2, Trash2, ShoppingCart, PackagePlus } from 'lucide-react';
 import { Card } from '../components/ui/card';
@@ -44,9 +44,44 @@ export function ProductDetail() {
   const [restockQuantity, setRestockQuantity] = useState('');
   const [salesQuantity, setSalesQuantity] = useState('');
 
+  const [movements, setMovements] = useState<any[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isAdjustStockDialogOpen, setIsAdjustStockDialogOpen] = useState(false);
+  
+  // Restock Form State
+  const [restockForm, setRestockForm] = useState({
+    quantity: '',
+    costPrice: '',
+    batchNumber: '',
+    expiryDate: ''
+  });
+
+  // Adjust Stock Form State
+  const [adjustForm, setAdjustForm] = useState({
+    quantity: '',
+    type: 'damaged', // expired, damaged, missing, correction
+    reason: ''
+  });
+
   useEffect(() => {
     loadProduct();
   }, [productId]);
+
+  useEffect(() => {
+    if (product) {
+      loadMovements();
+    }
+  }, [product]);
+
+  const loadMovements = async () => {
+    if (!product) return;
+    try {
+      const history = await productsApi.getMovements(product.id);
+      setMovements(history);
+    } catch (e) {
+      console.error("Failed to load history", e);
+    }
+  };
 
   const loadProduct = async () => {
     try {
@@ -72,9 +107,9 @@ export function ProductDetail() {
     if (!product) return;
     setEditingProduct({
       id: product.id,
-      name: product.name,
-      sku: product.sku,
-      category: product.category,
+      name: product.name || '',
+      sku: product.sku || '',
+      category: product.category || '',
       stock: (product.stock ?? 0).toString(),
       costPrice: (product.costPrice ?? 0).toString(),
       sellingPrice: (product.sellingPrice ?? 0).toString(),
@@ -119,19 +154,51 @@ export function ProductDetail() {
   };
 
   const handleRestock = async () => {
-    if (!product || !restockQuantity) return;
+    if (!product || !restockForm.quantity) return;
 
     try {
-      const quantity = parseInt(restockQuantity);
-      const updatedProduct = await productsApi.restock(product.id, quantity);
+      const quantity = parseInt(restockForm.quantity);
+      // Backend supports batchNumber and expiryDate
+      const updatedProduct = await productsApi.restock(
+          product.id, 
+          quantity, 
+          restockForm.batchNumber, 
+          restockForm.expiryDate
+      );
       setProduct(updatedProduct);
       setIsRestockDialogOpen(false);
-      setRestockQuantity('');
+      setRestockForm({ quantity: '', costPrice: '', batchNumber: '', expiryDate: '' });
       toast.success(`Added ${quantity} units to stock!`);
+      loadMovements();
     } catch (error) {
       console.error('Error restocking product:', error);
       toast.error('Failed to restock product');
     }
+  };
+
+  const handleAdjustStock = async () => {
+      if (!product || !adjustForm.quantity) return;
+      
+      try {
+          const qty = parseInt(adjustForm.quantity);
+          // Negative quantity for deduction
+          const adjustmentQty = -Math.abs(qty);
+          
+          const updatedProduct = await productsApi.adjustStock(
+              product.id,
+              adjustmentQty,
+              adjustForm.type,
+              adjustForm.reason
+          );
+          setProduct(updatedProduct);
+          setIsAdjustStockDialogOpen(false);
+          setAdjustForm({ quantity: '', type: 'damaged', reason: '' });
+          toast.success(`Stock adjusted by ${adjustmentQty} units.`);
+          loadMovements();
+      } catch (error) {
+          console.error('Error adjusting stock:', error);
+          toast.error('Failed to adjust stock');
+      }
   };
 
   const handleRecordSale = async () => {
@@ -194,6 +261,12 @@ export function ProductDetail() {
 
   const stockStatus = getStockStatus(product.stock, product.threshold);
   const profitMargin = ((product.sellingPrice - product.costPrice) / product.sellingPrice * 100).toFixed(1);
+  const marginValue = parseFloat(profitMargin);
+  let marginColor = 'text-white';
+  let marginLabel = '';
+  if (marginValue >= 40) { marginColor = 'text-green-400'; marginLabel = '(High)'; }
+  else if (marginValue >= 20) { marginColor = 'text-yellow-400'; marginLabel = '(Medium)'; }
+  else { marginColor = 'text-red-400'; marginLabel = '(Low)'; }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0A1828] via-[#0F4C81] to-[#1B365D] p-4 md:p-8">
@@ -275,6 +348,14 @@ export function ProductDetail() {
                   <ShoppingCart className="w-4 h-4 mr-2" />
                   Record Sale
                 </Button>
+                <Button
+                  onClick={() => setIsAdjustStockDialogOpen(true)}
+                  variant="outline"
+                  className="w-full text-white border-white/20 hover:bg-white/10"
+                >
+                  <AlertCircle className="w-4 h-4 mr-2" />
+                  Adjust Stock
+                </Button>
               </div>
             </Card>
           </motion.div>
@@ -347,7 +428,10 @@ export function ProductDetail() {
                     <TrendingUp className="w-4 h-4 text-blue-400" />
                     <p className="text-white/60 text-sm">Profit Margin</p>
                   </div>
-                  <p className="text-white">{profitMargin}%</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className={`text-xl font-bold ${marginColor}`}>{profitMargin}%</p>
+                    <span className={`text-xs ${marginColor}`}>{marginLabel}</span>
+                  </div>
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-2">
@@ -404,6 +488,92 @@ export function ProductDetail() {
                   </div>
                 </div>
               </div>
+            </Card>
+            
+            {/* Batches & Expiry Intelligence */}
+            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
+              <h2 className="text-white mb-4">Stock Batches & Expiry</h2>
+              {!product.batches || product.batches.length === 0 ? (
+                <p className="text-white/60">No batch information available.</p>
+              ) : (
+                <div className="space-y-4">
+                  {product.batches.map((batch: any) => {
+                     const expiryDate = new Date(batch.expiryDate);
+                     const now = new Date();
+                     const timeDiff = expiryDate.getTime() - now.getTime();
+                     const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
+                     
+                     let statusColor = 'text-green-400';
+                     let suggestion = '';
+                     if (daysLeft < 0) { statusColor = 'text-red-500'; suggestion = 'Mark as Wastage'; }
+                     else if (daysLeft < 7) { statusColor = 'text-red-400'; suggestion = 'Apply Discount'; }
+                     else if (daysLeft < 30) { statusColor = 'text-yellow-400'; suggestion = 'Monitor'; }
+
+                     return (
+                       <div key={batch.id} className="bg-white/5 rounded-lg p-4 border border-white/10">
+                         <div className="flex justify-between items-start mb-2">
+                           <div>
+                             <p className="text-white font-medium">{batch.batchNumber}</p>
+                             <p className="text-white/60 text-xs">Rec: {new Date(batch.receivedDate).toLocaleDateString()}</p>
+                           </div>
+                           <div className="text-right">
+                             <p className="text-white font-bold">{batch.quantity} units</p>
+                             <Badge className={`mt-1 ${daysLeft < 7 ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300'}`}>
+                                {daysLeft < 0 ? 'Expired' : `${daysLeft} days left`}
+                             </Badge>
+                           </div>
+                         </div>
+                         {suggestion && (
+                           <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10">
+                              <p className={`text-xs ${statusColor} flex items-center gap-1`}>
+                                <AlertCircle size={12} /> Suggestion: {suggestion}
+                              </p>
+                           </div>
+                         )}
+                       </div>
+                     );
+                  })}
+                </div>
+              )}
+            </Card>
+
+            {/* Inventory History */}
+            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
+               <div className="flex items-center justify-between mb-4 cursor-pointer" onClick={() => setIsHistoryOpen(!isHistoryOpen)}>
+                 <h2 className="text-white">Inventory History</h2>
+                 <Button variant="ghost" size="sm" className="text-white/60 hover:text-white hover:bg-white/10">
+                    {isHistoryOpen ? 'Hide' : 'Show'}
+                 </Button>
+               </div>
+               
+               {isHistoryOpen && (
+                 <div className="space-y-3">
+                    {movements.length === 0 ? (
+                        <p className="text-white/60">No history available.</p>
+                    ) : (
+                        movements.map((mov) => (
+                           <div key={mov.id} className="flex justify-between items-center py-2 border-b border-white/10 last:border-0">
+                              <div>
+                                 <div className="flex items-center gap-2">
+                                    <span className={`text-xs px-2 py-0.5 rounded uppercase font-bold ${
+                                        mov.type === 'sale' ? 'bg-blue-500/20 text-blue-300' :
+                                        mov.type === 'restock' ? 'bg-green-500/20 text-green-300' :
+                                        'bg-red-500/20 text-red-300'
+                                    }`}>
+                                        {mov.type}
+                                    </span>
+                                    <span className="text-white/80 text-sm">{mov.reason}</span>
+                                 </div>
+                                 <p className="text-white/40 text-xs mt-1">{new Date(mov.date).toLocaleString()}</p>
+                              </div>
+                              <div className={`font-mono font-bold ${mov.quantity > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                 {mov.quantity > 0 ? '+' : ''}{mov.quantity}
+                              </div>
+                           </div>
+                        ))
+                    )}
+                 </div>
+               )}
             </Card>
           </motion.div>
         </div>
@@ -591,20 +761,106 @@ export function ProductDetail() {
               <Input
                 id="restock-quantity"
                 type="number"
-                value={restockQuantity}
-                onChange={(e) => setRestockQuantity(e.target.value)}
+                value={restockForm.quantity}
+                onChange={(e) => setRestockForm({...restockForm, quantity: e.target.value})}
                 className="bg-white/10 border-white/20 text-white"
                 placeholder="Enter quantity"
               />
             </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="restock-batch" className="text-white">Batch Number</Label>
+                  <Input
+                    id="restock-batch"
+                    value={restockForm.batchNumber}
+                    onChange={(e) => setRestockForm({...restockForm, batchNumber: e.target.value})}
+                    className="bg-white/10 border-white/20 text-white"
+                    placeholder="Optional"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="restock-expiry" className="text-white">Expiry Date</Label>
+                  <Input
+                    id="restock-expiry"
+                    type="date"
+                    value={restockForm.expiryDate}
+                    onChange={(e) => setRestockForm({...restockForm, expiryDate: e.target.value})}
+                    className="bg-white/10 border-white/20 text-white"
+                  />
+                </div>
+            </div>
+
             <p className="text-white/60 text-sm">
-              New Stock: {product.stock + (parseInt(restockQuantity) || 0)} units
+              New Stock: {product.stock + (parseInt(restockForm.quantity) || 0)} units
             </p>
             <div className="flex gap-2 pt-4">
               <Button onClick={handleRestock} className="flex-1 bg-green-600 hover:bg-green-700">
                 Confirm Restock
               </Button>
               <Button onClick={() => setIsRestockDialogOpen(false)} variant="outline" className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Adjust Stock Dialog */}
+      <Dialog open={isAdjustStockDialogOpen} onOpenChange={setIsAdjustStockDialogOpen}>
+        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="adjust-stock-description">
+          <DialogHeader>
+            <DialogTitle className="text-white">Adjust Stock (Reduction)</DialogTitle>
+            <DialogDescription id="adjust-stock-description" className="text-white/60">
+              Record wastage, damage, or inventory corrections.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-white/80">Current Stock: {product.stock} units</p>
+            
+            <div>
+              <Label htmlFor="adjust-quantity" className="text-white">Quantity to Remove</Label>
+              <Input
+                id="adjust-quantity"
+                type="number"
+                value={adjustForm.quantity}
+                onChange={(e) => setAdjustForm({...adjustForm, quantity: e.target.value})}
+                className="bg-white/10 border-white/20 text-white"
+                placeholder="Enter quantity"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="adjust-type" className="text-white">Reason</Label>
+              <select 
+                id="adjust-type"
+                value={adjustForm.type}
+                onChange={(e) => setAdjustForm({...adjustForm, type: e.target.value})}
+                className="w-full bg-white/10 border border-white/20 text-white rounded-md p-2"
+              >
+                  <option value="expired">Expired</option>
+                  <option value="damaged">Damaged</option>
+                  <option value="missing">Missing / Theft</option>
+                  <option value="correction">Inventory Correction</option>
+              </select>
+            </div>
+            
+            <div>
+               <Label htmlFor="adjust-notes" className="text-white">Notes (Optional)</Label>
+               <Input
+                  id="adjust-notes"
+                  value={adjustForm.reason}
+                  onChange={(e) => setAdjustForm({...adjustForm, reason: e.target.value})}
+                  className="bg-white/10 border-white/20 text-white"
+                  placeholder="Additional details..."
+               />
+            </div>
+
+            <div className="flex gap-2 pt-4">
+              <Button onClick={handleAdjustStock} className="flex-1 bg-red-600 hover:bg-red-700">
+                Confirm Reduction
+              </Button>
+              <Button onClick={() => setIsAdjustStockDialogOpen(false)} variant="outline" className="flex-1">
                 Cancel
               </Button>
             </div>

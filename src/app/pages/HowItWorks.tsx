@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Plus, Bell, ChartColumn, Clock } from 'lucide-react';
+import imgWatchFreshness from 'figma:asset/bb4678c6cac92df9f360bbc019d27acc25ccdbed.png';
 
 const fadeInUp = {
   initial: { opacity: 0, y: 20 },
@@ -25,7 +26,7 @@ export function HowItWorks() {
       desc: "Arali quietly watches your inventory. Items are sorted by freshness, so you always know what needs to be sold first.",
       icon: Clock,
       color: "bg-[#0F4C81]/10 text-[#0F4C81]",
-      image: "https://images.unsplash.com/photo-1722581248341-de9b34c116bb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMGdyb2NlcnklMjBzdG9yZXxlbnwxfHx8fDE3NjY2NDU2MjV8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
+      image: imgWatchFreshness
     },
     {
       id: "03",

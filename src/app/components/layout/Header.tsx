@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 import { Menu, X } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { Button } from '../ui/button';
@@ -13,8 +13,10 @@ export function Header() {
   const navLinks = [
     { name: 'How it Works', path: '/how-it-works' },
     { name: 'Features', path: '/features' },
+    { name: 'Pricing', path: '/pricing' },
     { name: 'Why Arali', path: '/why-arali' },
     { name: 'Story', path: '/story' },
+    { name: 'Blog', path: '/blog' },
     { name: 'FAQ', path: '/faq' },
   ];
 

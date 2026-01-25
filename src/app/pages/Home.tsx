@@ -1,8 +1,12 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Button } from '../components/ui/button';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { ArrowRight, CircleAlert, TrendingDown, EyeOff, ClipboardList, Check, X, Smartphone, Bell, ChartColumn, Clock } from 'lucide-react';
+import Container1 from '../../imports/Container';
+import { BlogSection } from '../components/blog/BlogSection';
+
+const imgMobileAppPreview = "https://images.unsplash.com/photo-1727782645141-2da5023c5c9e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb2JpbGUlMjBhcHAlMjBpbnRlcmZhY2UlMjByZXRhaWwlMjBtYW5hZ2VtZW50fGVufDF8fHx8MTc2ODU1MjM4OHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral";
 
 const fadeInUp = {
   initial: { opacity: 0, y: 20 },
@@ -26,7 +30,7 @@ export function Home() {
     <div className="flex flex-col gap-0">
       
       {/* 4.1 Hero Section */}
-      <section className="relative min-h-[90vh] flex items-center pt-20 pb-20 overflow-hidden bg-[#F5F9FC]">
+      <section className="relative min-h-[90vh] flex items-center pt-[32px] pb-[80px] overflow-hidden bg-[#F5F9FC] pr-[0px] pl-[0px] px-[0px] py-[32px]">
         <div className="container mx-auto px-6 relative z-10">
           <div className="flex flex-col lg:flex-row gap-20 items-center justify-between">
             <div className="max-w-2xl lg:w-5/12">
@@ -46,7 +50,7 @@ export function Home() {
                 className="text-5xl md:text-7xl lg:text-8xl font-semibold tracking-tighter text-[#0F4C81] leading-[0.95] mb-10"
               >
                 Run your business with <br />
-                <span className="text-[#0F4C81]/40">quiet confidence.</span>
+                <span className="text-[#0F4C81]/40">confidence.</span>
               </motion.h1>
               
               <motion.p 
@@ -66,7 +70,7 @@ export function Home() {
                 transition={{ duration: 0.6, delay: 0.2 }}
                 className="flex flex-col sm:flex-row gap-5"
               >
-                <Link to="/get-started">
+                <Link to="/login">
                   <Button className="h-14 px-10 bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-[#F5F9FC] text-lg rounded-full w-full sm:w-auto shadow-xl shadow-[#0F4C81]/10 transition-transform hover:scale-[1.02]">
                     Start for free
                   </Button>
@@ -92,7 +96,9 @@ export function Home() {
                     alt="Shop owner managing inventory"
                     className="w-full h-full object-cover grayscale-[10%]"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0F4C81]/20 to-transparent mix-blend-multiply opacity-60"></div>
+                  <div className="absolute inset-0 z-10">
+                    <Container1 />
+                  </div>
                 </div>
             </motion.div>
           </div>
@@ -243,8 +249,8 @@ export function Home() {
               className="relative"
             >
                <img 
-                src="https://images.unsplash.com/photo-1719407812772-3695fc7d335c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjByZXRhaWwlMjBzdG9yZSUyMGludGVyaW9yJTIwZGVzaWduJTIwYmx1ZSUyMHRoZW1lfGVufDF8fHx8MTc2NTk4ODc1NXww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral"
-                alt="Modern retail store" 
+                src={imgMobileAppPreview}
+                alt="Arali mobile app interface" 
                 className="rounded-2xl opacity-90 shadow-2xl grayscale-[20%] sepia-[10%]"
               />
             </motion.div>
@@ -333,6 +339,9 @@ export function Home() {
           </div>
         </div>
       </section>
+
+      {/* Blog Section */}
+      <BlogSection />
 
       {/* 4.7 Who It's For */}
       <section className="py-24 bg-[#EBF4FA]">

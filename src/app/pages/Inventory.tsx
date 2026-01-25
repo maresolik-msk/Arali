@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
-import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon, ScanLine } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon, ScanLine, Download } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
@@ -15,21 +15,34 @@ import { lookupProductByBarcode } from '../services/productLookup';
 import { parseVoiceCommand, generateVoiceSummary } from '../services/voiceParser';
 import { BarcodeScanner } from '../components/BarcodeScanner';
 import { VoiceInput } from '../components/VoiceInput';
-import type { Product, Vendor } from '../data/dashboardData';
+import { usePlan } from '../hooks/usePlan';
+import { UpgradeModal } from '../components/UpgradeModal';
+import type { Product, Vendor, Loss } from '../data/dashboardData';
 
 // Milk product image from Unsplash
 const MILK_IMAGE_URL = "https://images.unsplash.com/photo-1635436338433-89747d0ca0ef?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaWxrJTIwYm90dGxlJTIwZGFpcnl8ZW58MXx8fHwxNzY4MDYyNzY2fDA&ixlib=rb-4.1.0&q=80&w=1080";
 
 export function Inventory() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Handle URL actions
+  useEffect(() => {
+    if (searchParams.get('action') === 'add') {
+      setIsAddDialogOpen(true);
+    }
+  }, [searchParams]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [inventoryItems, setInventoryItems] = useState<Product[]>([]);
+  const [losses, setLosses] = useState<Loss[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isRestockDialogOpen, setIsRestockDialogOpen] = useState(false);
   const [isRecordSalesDialogOpen, setIsRecordSalesDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isLossesDialogOpen, setIsLossesDialogOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [productToDelete, setProductToDelete] = useState<{ id: number; name: string } | null>(null);
@@ -78,6 +91,11 @@ export function Inventory() {
     quantitySold: string;
   } | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  
+  // Pricing Plan Integration
+  const { checkLimit, isFree, isStarter, limits } = usePlan();
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [upgradeMessage, setUpgradeMessage] = useState('');
 
   // Load products from backend on mount
   useEffect(() => {
@@ -133,6 +151,39 @@ export function Inventory() {
 
     return () => {
       isMounted = false; // Cleanup on unmount
+    };
+  }, []);
+
+  // Automatic expiry processing on mount
+  useEffect(() => {
+    let isMounted = true;
+
+    const runExpiryCheck = async () => {
+      try {
+        // Run check silently in background
+        const { processedCount, totalLoss } = await productsApi.processExpiry();
+        
+        if (processedCount > 0 && isMounted) {
+          toast.info(`Inventory Update: Automatically removed ${processedCount} expired items.`, {
+            description: `Recorded loss of ₹${totalLoss}. Check Losses history for details.`,
+            duration: 6000,
+          });
+          
+          // Refresh products to show updated stock
+          const products = await productsApi.getAll();
+          if (isMounted) {
+            setInventoryItems(products || []);
+          }
+        }
+      } catch (error) {
+        console.error('Background expiry check failed:', error);
+      }
+    };
+
+    runExpiryCheck();
+
+    return () => {
+      isMounted = false;
     };
   }, []);
 
@@ -228,28 +279,35 @@ export function Inventory() {
       });
 
       // Create app notifications for low stock products
-      lowStockProducts.forEach((product) => {
-        notificationsApi.create({
-          userId: '', // Will be set by backend
-          type: 'low_stock',
-          title: 'Low Stock Alert',
-          message: `${product.name} is running low. Only ${product.stock} units remaining (threshold: ${product.threshold}).`,
-          read: false,
-          relatedTo: {
-            type: 'product',
-            id: product.id,
-            name: product.name,
-          },
-        })
-        .then(() => {
-          if (isMounted) {
-            setLowStockNotified(prev => new Set([...prev, product.id]));
-          }
-        })
-        .catch(error => {
-          console.error('Failed to create notification:', error);
+      if (limits.canUseSmartAlerts) {
+        lowStockProducts.forEach((product) => {
+          notificationsApi.create({
+            userId: '', // Will be set by backend
+            type: 'low_stock',
+            title: 'Low Stock Alert',
+            message: `${product.name} is running low. Only ${product.stock} units remaining (threshold: ${product.threshold}).`,
+            read: false,
+            relatedTo: {
+              type: 'product',
+              id: product.id,
+              name: product.name,
+            },
+          })
+          .then(() => {
+            if (isMounted) {
+              setLowStockNotified(prev => new Set([...prev, product.id]));
+            }
+          })
+          .catch(error => {
+            console.error('Failed to create notification:', error);
+          });
         });
-      });
+      } else {
+        // Just mark as notified to avoid repeated checks, but don't send API call
+        if (isMounted) {
+          lowStockProducts.forEach(p => setLowStockNotified(prev => new Set([...prev, p.id])));
+        }
+      }
     }
     
     // Show notifications for out of stock products (only once per product)
@@ -371,6 +429,13 @@ export function Inventory() {
   };
 
   const handleAddProduct = async () => {
+    // Check Plan Limits
+    if (!checkLimit('maxSkus', inventoryItems.length)) {
+      setUpgradeMessage(`You have reached the maximum of ${inventoryItems.length} products allowed on your plan.`);
+      setIsUpgradeModalOpen(true);
+      return;
+    }
+
     // Validate form
     if (!newProduct.name || !newProduct.sku || !newProduct.category || !newProduct.stock || !newProduct.costPrice || !newProduct.sellingPrice || !newProduct.vendorType) {
       toast.error('Please fill in all fields');
@@ -476,16 +541,16 @@ export function Inventory() {
   const handleEditClick = (item: any) => {
     setEditingProduct({
       id: item.id,
-      name: item.name,
-      sku: item.sku,
-      category: item.category,
-      stock: item.stock.toString(),
+      name: item.name || '',
+      sku: item.sku || '',
+      category: item.category || '',
+      stock: (item.stock ?? 0).toString(),
       costPrice: (item.costPrice ? item.costPrice : (typeof item.price === 'number' ? item.price : parseFloat(item.price.replace('₹', '')))).toString(),
       sellingPrice: (item.sellingPrice ? item.sellingPrice : (typeof item.price === 'number' ? item.price : parseFloat(item.price.replace('₹', '')))).toString(),
       vendorType: item.vendorType || '',
       expiryDate: item.expiryDate || '',
       alertEnabled: item.alertEnabled || true,
-      threshold: item.threshold.toString() || '10',
+      threshold: (item.threshold ?? 10).toString(),
       imageUrl: item.imageUrl || '',
     });
     setIsEditDialogOpen(true);
@@ -493,6 +558,10 @@ export function Inventory() {
 
   const handleUpdateProduct = async () => {
     if (!editingProduct) return;
+    if (!editingProduct.id) {
+        toast.error("Product ID is missing. Cannot update.");
+        return;
+    }
 
     // Validate form
     if (!editingProduct.name || !editingProduct.sku || !editingProduct.category || !editingProduct.stock || !editingProduct.costPrice || !editingProduct.sellingPrice || !editingProduct.vendorType) {
@@ -601,6 +670,10 @@ export function Inventory() {
 
   const handleRestockProduct = async () => {
     if (!restockingProduct) return;
+    if (!restockingProduct.id) {
+        toast.error("Product ID is missing.");
+        return;
+    }
 
     // Validate form
     if (!restockingProduct.quantity) {
@@ -650,6 +723,10 @@ export function Inventory() {
 
   const handleRecordSales = async () => {
     if (!recordingSalesProduct) return;
+    if (!recordingSalesProduct.id) {
+        toast.error("Product ID is missing.");
+        return;
+    }
 
     // Validate form
     if (!recordingSalesProduct.quantitySold) {
@@ -713,6 +790,10 @@ export function Inventory() {
 
   const handleDeleteProduct = async () => {
     if (!productToDelete) return;
+    if (!productToDelete.id) {
+        toast.error("Product ID is missing.");
+        return;
+    }
 
     try {
       // Delete in backend
@@ -746,14 +827,15 @@ export function Inventory() {
       if (productInfo) {
         // Pre-fill the form with product info
         setNewProduct({
-          name: productInfo.name,
+          name: productInfo.name || '',
           sku: barcode,
-          category: productInfo.category,
+          category: productInfo.category || '',
           stock: '',
           costPrice: '',
           sellingPrice: '',
           vendorType: productInfo.brand || '',
           expiryDate: '',
+          batchNumber: '',
           alertEnabled: true,
           threshold: '10',
           imageUrl: productInfo.imageUrl || '',
@@ -804,6 +886,7 @@ export function Inventory() {
     
     // Process sequentially to avoid rate limits
     for (const product of productsWithoutImages) {
+      if (!product.id) continue;
       try {
         // Update toast to show progress
         toast.loading(`Generating image for: ${product.name} (${successCount + 1}/${productsWithoutImages.length})`, { id: toastId });
@@ -877,10 +960,85 @@ export function Inventory() {
     }
   };
 
+  const handleProcessExpiry = async () => {
+    try {
+      const { processedCount, totalLoss } = await productsApi.processExpiry();
+      
+      if (processedCount > 0) {
+        toast.success(`Processed expiry: ${processedCount} items removed (Loss: ₹${totalLoss})`);
+        // Refresh products
+        setIsLoading(true);
+        const products = await productsApi.getAll();
+        setInventoryItems(products || []);
+        setIsLoading(false);
+      } else {
+        toast.info('No expired items found.');
+      }
+    } catch (error) {
+      console.error('Error processing expiry:', error);
+      toast.error('Failed to process expiry');
+    }
+  };
+
+  const handleViewLosses = async () => {
+    try {
+      setIsLoading(true);
+      const lossesData = await productsApi.getLosses();
+      setLosses(lossesData || []);
+      setIsLossesDialogOpen(true);
+    } catch (error) {
+      console.error('Error fetching losses:', error);
+      toast.error('Failed to load losses history');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleExportLosses = () => {
+    if (losses.length === 0) {
+      toast.error('No data to export');
+      return;
+    }
+    
+    try {
+      const headers = ['Date', 'Product Name', 'Batch Number', 'Quantity', 'Loss Amount', 'Reason'];
+      const csvContent = [
+        headers.join(','),
+        ...losses.map(loss => [
+          new Date(loss.date).toLocaleDateString(),
+          `"${loss.productName.replace(/"/g, '""')}"`,
+          loss.batchNumber || '',
+          loss.quantity,
+          loss.lossAmount,
+          loss.reason
+        ].join(','))
+      ].join('\n');
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `losses_report_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Loss report exported successfully');
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      toast.error('Failed to export report');
+    }
+  };
+
   const handleAddDialogChange = (open: boolean) => {
     setIsAddDialogOpen(open);
     // Reset form when dialog closes
     if (!open) {
+      if (searchParams.get('action') === 'add') {
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete('action');
+        navigate({ search: newParams.toString() }, { replace: true });
+      }
+
       setNewProduct({
         name: '',
         sku: '',
@@ -922,6 +1080,14 @@ export function Inventory() {
               Scan Barcode
             </Button>
             */}
+            <Button 
+              variant="outline"
+              className="border-red-500 text-red-500 hover:bg-red-50 rounded-full shadow-lg flex"
+              onClick={handleViewLosses}
+            >
+              <CircleAlert className="w-4 h-4 mr-2" />
+              Losses
+            </Button>
             <Button 
               variant="outline"
               className="border-[#0F4C81] text-[#0F4C81] hover:bg-[#0F4C81]/10 rounded-full shadow-lg hidden md:flex"
@@ -969,14 +1135,25 @@ export function Inventory() {
                   <th className="text-left py-4 px-6 text-foreground">Category</th>
                   <th className="text-left py-4 px-6 text-foreground">Stock</th>
                   <th className="text-left py-4 px-6 text-foreground">Price</th>
+                  <th className="text-left py-4 px-6 text-foreground">Margin</th>
                   <th className="text-left py-4 px-6 text-foreground">Status</th>
                   <th className="text-left py-4 px-6 text-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => (
+                {filteredItems.map((item, index) => {
+                  const sellingPrice = typeof item.price === 'number' ? item.price : parseFloat(item.price.replace(/[^0-9.]/g, '') || '0');
+                  const costPrice = item.costPrice || 0;
+                  const margin = sellingPrice > 0 ? ((sellingPrice - costPrice) / sellingPrice * 100).toFixed(0) : '0';
+                  const marginVal = parseFloat(margin);
+                  let marginColor = 'bg-gray-100 text-gray-600';
+                  if (marginVal >= 40) marginColor = 'bg-green-100 text-green-700';
+                  else if (marginVal >= 20) marginColor = 'bg-yellow-100 text-yellow-700';
+                  else marginColor = 'bg-red-100 text-red-700';
+
+                  return (
                   <tr 
-                    key={item.id}
+                    key={`${item.id}-${index}`}
                     className="border-b border-[#0F4C81]/5 hover:bg-[#0F4C81]/5 transition-colors"
                   >
                     <td className="py-4 px-6">
@@ -1009,7 +1186,16 @@ export function Inventory() {
                         <span className="text-foreground">{item.stock}</span>
                       </div>
                     </td>
-                    <td className="py-4 px-6 text-foreground">₹{typeof item.price === 'number' ? item.price.toFixed(2) : item.price}</td>
+                    <td className="py-4 px-6 text-foreground">₹{sellingPrice.toFixed(2)}</td>
+                    <td className="py-4 px-6">
+                       {costPrice > 0 ? (
+                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${marginColor}`}>
+                               {margin}%
+                           </span>
+                       ) : (
+                           <span className="text-muted-foreground text-xs">-</span>
+                       )}
+                    </td>
                     <td className="py-4 px-6">
                       <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${getStatusColor(getStatus(item.stock, item.threshold))}`}>
                         {getStatus(item.stock, item.threshold)}
@@ -1049,7 +1235,8 @@ export function Inventory() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1336,7 +1523,7 @@ export function Inventory() {
                 id="name" 
                 placeholder="e.g., Organic Coffee Beans"
                 value={editingProduct?.name || ''} 
-                onChange={(e) => setEditingProduct({ ...editingProduct!, name: e.target.value })} 
+                onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, name: e.target.value }) : null)} 
                 className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
               />
             </div>
@@ -1346,7 +1533,7 @@ export function Inventory() {
                 id="sku" 
                 placeholder="e.g., COF-001"
                 value={editingProduct?.sku || ''} 
-                onChange={(e) => setEditingProduct({ ...editingProduct!, sku: e.target.value })} 
+                onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, sku: e.target.value }) : null)} 
                 className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
               />
             </div>
@@ -1357,7 +1544,7 @@ export function Inventory() {
                 list="editCategoryList"
                 placeholder="e.g., Beverages"
                 value={editingProduct?.category || ''} 
-                onChange={(e) => setEditingProduct({ ...editingProduct!, category: e.target.value })} 
+                onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, category: e.target.value }) : null)} 
                 className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
               />
               <datalist id="editCategoryList">
@@ -1372,7 +1559,7 @@ export function Inventory() {
                 id="editExpiryDate" 
                 type="date"
                 value={editingProduct?.expiryDate || ''} 
-                onChange={(e) => setEditingProduct({ ...editingProduct!, expiryDate: e.target.value })} 
+                onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, expiryDate: e.target.value }) : null)} 
                 className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
               />
             </div>
@@ -1384,7 +1571,7 @@ export function Inventory() {
                   type="number"
                   placeholder="0"
                   value={editingProduct?.stock || ''} 
-                  onChange={(e) => setEditingProduct({ ...editingProduct!, stock: e.target.value })} 
+                  onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, stock: e.target.value }) : null)} 
                   className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
                 />
               </div>
@@ -1395,7 +1582,7 @@ export function Inventory() {
                   type="text"
                   placeholder="24.99"
                   value={editingProduct?.costPrice || ''} 
-                  onChange={(e) => setEditingProduct({ ...editingProduct!, costPrice: e.target.value })} 
+                  onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, costPrice: e.target.value }) : null)} 
                   className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
                 />
               </div>
@@ -1406,7 +1593,7 @@ export function Inventory() {
                   type="text"
                   placeholder="24.99"
                   value={editingProduct?.sellingPrice || ''} 
-                  onChange={(e) => setEditingProduct({ ...editingProduct!, sellingPrice: e.target.value })} 
+                  onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, sellingPrice: e.target.value }) : null)} 
                   className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
                 />
               </div>
@@ -1417,7 +1604,7 @@ export function Inventory() {
                   list="editVendorList"
                   placeholder="Select or type vendor name"
                   value={editingProduct?.vendorType || ''} 
-                  onChange={(e) => setEditingProduct({ ...editingProduct!, vendorType: e.target.value })} 
+                  onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, vendorType: e.target.value }) : null)} 
                   className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
                 />
                 <datalist id="editVendorList">
@@ -1521,7 +1708,7 @@ export function Inventory() {
                   type="number"
                   placeholder="0"
                   value={restockingProduct?.quantity || ''} 
-                  onChange={(e) => setRestockingProduct({ ...restockingProduct!, quantity: e.target.value })} 
+                  onChange={(e) => setRestockingProduct(prev => prev ? ({ ...prev, quantity: e.target.value }) : null)} 
                   className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
                 />
                 <VoiceInput onTranscript={handleRestockVoiceInput} />
@@ -1536,7 +1723,7 @@ export function Inventory() {
                 id="restockBatchNumber" 
                 placeholder="e.g., BATCH-002"
                 value={restockingProduct?.batchNumber || ''} 
-                onChange={(e) => setRestockingProduct({ ...restockingProduct!, batchNumber: e.target.value })} 
+                onChange={(e) => setRestockingProduct(prev => prev ? ({ ...prev, batchNumber: e.target.value }) : null)} 
                 className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
               />
             </div>
@@ -1546,7 +1733,7 @@ export function Inventory() {
                 id="restockExpiryDate" 
                 type="date"
                 value={restockingProduct?.expiryDate || ''} 
-                onChange={(e) => setRestockingProduct({ ...restockingProduct!, expiryDate: e.target.value })} 
+                onChange={(e) => setRestockingProduct(prev => prev ? ({ ...prev, expiryDate: e.target.value }) : null)} 
                 className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
               />
             </div>
@@ -1621,7 +1808,7 @@ export function Inventory() {
                   type="number"
                   placeholder="0"
                   value={recordingSalesProduct?.quantitySold || ''} 
-                  onChange={(e) => setRecordingSalesProduct({ ...recordingSalesProduct!, quantitySold: e.target.value })} 
+                  onChange={(e) => setRecordingSalesProduct(prev => prev ? ({ ...prev, quantitySold: e.target.value }) : null)} 
                   className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
                 />
                 <VoiceInput onTranscript={handleSalesVoiceInput} />
@@ -1693,6 +1880,77 @@ export function Inventory() {
         </DialogContent>
       </Dialog>
 
+      {/* Losses Dialog */}
+      <Dialog open={isLossesDialogOpen} onOpenChange={setIsLossesDialogOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
+          <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div className="space-y-1">
+              <DialogTitle>Recorded Losses</DialogTitle>
+              <DialogDescription>
+                History of expired items removed from stock.
+              </DialogDescription>
+            </div>
+            {losses.length > 0 && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleExportLosses}
+                className="h-8 gap-2"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Export CSV</span>
+              </Button>
+            )}
+          </DialogHeader>
+          <div className="mt-4">
+             {losses.length === 0 ? (
+               <div className="text-center py-8 text-muted-foreground">
+                 <CircleAlert className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                 <p>No losses recorded yet.</p>
+               </div>
+             ) : (
+               <div className="relative overflow-x-auto rounded-xl border border-border">
+                 <table className="w-full text-sm text-left">
+                   <thead className="text-xs uppercase bg-muted text-muted-foreground">
+                     <tr>
+                       <th className="px-4 py-3">Date</th>
+                       <th className="px-4 py-3">Product</th>
+                       <th className="px-4 py-3 text-right">Qty</th>
+                       <th className="px-4 py-3 text-right">Loss Value</th>
+                       <th className="px-4 py-3">Reason</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {losses.slice().reverse().map((loss) => (
+                       <tr key={loss.id} className="bg-card border-b border-border last:border-0">
+                         <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
+                           {new Date(loss.date).toLocaleDateString()}
+                         </td>
+                         <td className="px-4 py-3 font-medium text-foreground">
+                           {loss.productName}
+                           {loss.batchNumber && <span className="block text-xs text-muted-foreground">Batch: {loss.batchNumber}</span>}
+                         </td>
+                         <td className="px-4 py-3 text-right font-medium text-red-600">
+                           -{loss.quantity}
+                         </td>
+                         <td className="px-4 py-3 text-right font-medium text-red-600">
+                           ₹{loss.lossAmount.toLocaleString()}
+                         </td>
+                         <td className="px-4 py-3 text-muted-foreground">
+                           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                             {loss.reason}
+                           </span>
+                         </td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Barcode Scanner - Temporarily hidden
       {isScannerOpen && (
         <BarcodeScanner
@@ -1701,6 +1959,12 @@ export function Inventory() {
         />
       )}
       */}
+      {/* Upgrade Modal */}
+      <UpgradeModal
+        isOpen={isUpgradeModalOpen}
+        onClose={() => setIsUpgradeModalOpen(false)}
+        description={upgradeMessage}
+      />
     </div>
   );
 }

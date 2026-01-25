@@ -1,11 +1,42 @@
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { supabase } from './supabaseClient';
-import type { Product, Customer, Order, RevenueSource, Notification, Vendor } from '../data/dashboardData';
+import type { Product, Customer, Order, RevenueSource, Notification, Vendor, Purchase, Loss } from '../data/dashboardData';
+
+export interface DailyMission {
+  id: string;
+  type: 'LOW_STOCK' | 'EXPIRY' | 'VENDOR_PAYMENT' | 'SALES_GOAL';
+  title: string;
+  description: string;
+  action: 'REORDER' | 'DISCOUNT' | 'PAY' | 'REVIEW';
+  targetId?: string;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  completed?: boolean;
+}
+
+export interface StoreHealth {
+  score: number;
+  status: 'HEALTHY' | 'NEEDS_ATTENTION' | 'RISK';
+  metrics: {
+    lowStock: number;
+    expiring: number;
+    salesTrend: number;
+  };
+}
+
+export interface EndOfDaySummary {
+  sales: number;
+  profit_estimate: number;
+  wastage: number;
+  best_seller: string;
+  missed_sales: string[];
+}
 
 export interface ShopSettings {
   shopName: string;
   shopAddress: string;
   contactEmail: string;
+  shopLogoUrl?: string;
+  gstIn?: string; // Added for Invoice logic
   updatedAt?: string;
 }
 
@@ -36,11 +67,17 @@ function isTokenExpired(token: string): boolean {
     const isExpired = expiryTime <= now + bufferMs;
     
     if (isExpired) {
-      const minutesAgo = Math.round((now - expiryTime) / 1000 / 60);
-      console.warn(`Token is expired or expires soon (expired ${minutesAgo} minutes ago)`);
-    } else {
-      const minutesLeft = Math.round((expiryTime - now) / 1000 / 60);
-      console.log(`Token is valid (expires in ${minutesLeft} minutes)`);
+      const msUntilExpiry = expiryTime - now;
+      const minutesUntilExpiry = Math.round(msUntilExpiry / 1000 / 60);
+      
+      if (msUntilExpiry > 0) {
+         // Expires soon (within buffer)
+         console.log(`Token expiring soon (in ${minutesUntilExpiry} minutes) - preemptive refresh`);
+      } else {
+         // Actually expired
+         const minutesAgo = Math.abs(minutesUntilExpiry);
+         console.warn(`Token expired ${minutesAgo} minutes ago`);
+      }
     }
     
     return isExpired;
@@ -192,89 +229,89 @@ async function apiRequest<T>(
   if (!accessToken) {
     console.warn('No access token found. User may need to sign in.');
   }
-  
-  try {
     // Create an abort controller for timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken || publicAnonKey}`,
-        ...options.headers,
-      },
-    });
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken || publicAnonKey}`,
+          ...options.headers,
+        },
+      });
 
-    clearTimeout(timeoutId);
-
-    // Handle 401 Unauthorized - token might be expired, try to refresh
-    if (response.status === 401 && retryCount === 0) {
-      console.log('Received 401, attempting to refresh session and retry...');
-      
-      // Force refresh the session
-      const { data: { session }, error } = await supabase.auth.refreshSession();
-      
-      if (error || !session) {
-        console.error('Session refresh failed:', error);
-        // Clear auth data and redirect to login
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user');
-        sessionStorage.removeItem('access_token');
-        window.location.href = '/login';
-        throw new Error('Session expired. Please log in again.');
+      // Handle 401 Unauthorized - token might be expired, try to refresh
+      if (response.status === 401 && retryCount === 0) {
+        console.log('Received 401, attempting to refresh session and retry...');
+        
+        // Force refresh the session
+        const { data: { session }, error } = await supabase.auth.refreshSession();
+        
+        if (error || !session) {
+          console.error('Session refresh failed:', error);
+          // Clear auth data and redirect to login
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('user');
+          sessionStorage.removeItem('access_token');
+          window.location.href = '/login';
+          throw new Error('Session expired. Please log in again.');
+        }
+        
+        // Update stored tokens
+        localStorage.setItem('auth_token', session.access_token);
+        sessionStorage.setItem('access_token', session.access_token);
+        
+        // Retry the request with the new token (only once)
+        return apiRequest<T>(endpoint, options, retryCount + 1);
       }
-      
-      // Update stored tokens
-      localStorage.setItem('auth_token', session.access_token);
-      sessionStorage.setItem('access_token', session.access_token);
-      
-      // Retry the request with the new token (only once)
-      return apiRequest<T>(endpoint, options, retryCount + 1);
-    }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = 'Unknown error';
-      
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.error || errorJson.message || errorMessage;
-      } catch {
-        errorMessage = errorText || `Request failed with status ${response.status}`;
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Unknown error';
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorJson.message || errorMessage;
+        } catch {
+          errorMessage = errorText || `Request failed with status ${response.status}`;
+        }
+        
+        // Only log errors in development or for critical endpoints
+        const isCriticalEndpoint = !endpoint.includes('unread-count');
+        if (process.env.NODE_ENV === 'development' || isCriticalEndpoint) {
+          console.error(`API Error (${endpoint}):`, {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorMessage
+          });
+        }
+        
+        throw new Error(errorMessage);
       }
-      
-      // Only log errors in development or for critical endpoints
+
+      const data = await response.json();
+      return data as T;
+    } catch (error: any) {
+      // Handle timeout errors gracefully
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        console.warn(`API Request timeout (${endpoint})`);
+        throw new Error('Request timeout');
+      }
+
+      // Only log non-critical endpoint errors in development
       const isCriticalEndpoint = !endpoint.includes('unread-count');
-      if (process.env.NODE_ENV === 'development' || isCriticalEndpoint) {
-        console.error(`API Error (${endpoint}):`, {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorMessage
-        });
+      // Skip logging for unread-count to avoid console spam
+      if (isCriticalEndpoint && (process.env.NODE_ENV === 'development' || isCriticalEndpoint)) {
+        console.error(`API Request failed (${endpoint}):`, error);
       }
-      
-      throw new Error(errorMessage);
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = await response.json();
-    return data as T;
-  } catch (error: any) {
-    // Handle timeout errors gracefully
-    if (error.name === 'AbortError') {
-      console.warn(`API Request timeout (${endpoint})`);
-      throw new Error('Request timeout');
-    }
-
-    // Only log non-critical endpoint errors in development
-    const isCriticalEndpoint = !endpoint.includes('unread-count');
-    if (process.env.NODE_ENV === 'development' || isCriticalEndpoint) {
-      console.error(`API Request failed (${endpoint}):`, error);
-    }
-    throw error;
-  }
 }
 
 // ========================================
@@ -329,6 +366,61 @@ export const productsApi = {
       body: JSON.stringify({ quantitySold }),
     });
     return data.product;
+  },
+
+  // Process expired products (remove from stock and record loss)
+  processExpiry: async (): Promise<{ processedCount: number; totalLoss: number }> => {
+    const data = await apiRequest<{ processedCount: number; totalLoss: number }>('/products/process-expired', {
+      method: 'POST',
+    });
+    return data;
+  },
+
+  // Batch Sales (Atomic)
+  batchSales: async (items: { productId: number; quantity: number }[]): Promise<{ success: boolean; transactionId: string }> => {
+    const data = await apiRequest<{ success: boolean; transactionId: string }>('/sales/batch', {
+        method: 'POST',
+        body: JSON.stringify({ items })
+    });
+    return data;
+  },
+
+  // Batch Purchase/Restock
+  batchRestock: async (items: { productId: number; quantity: number; costPrice: number }[]): Promise<{ success: boolean; transactionId: string }> => {
+    const data = await apiRequest<{ success: boolean; transactionId: string }>('/purchases/batch', {
+        method: 'POST',
+        body: JSON.stringify({ items })
+    });
+    return data;
+  },
+
+  // Undo Sales Transaction
+  undoSales: async (transactionId: string): Promise<void> => {
+      await apiRequest('/sales/undo', {
+          method: 'POST',
+          body: JSON.stringify({ transactionId })
+      });
+  },
+
+  // Adjust stock manually (Wastage, Damage, Correction)
+  adjustStock: async (id: number, quantity: number, type: string, reason?: string, batchId?: string): Promise<Product> => {
+    const data = await apiRequest<{ product: Product }>(`/products/${id}/adjust-stock`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity, type, reason, batchId }),
+    });
+    return data.product;
+  },
+
+  // Get inventory movements history
+  getMovements: async (productId: number): Promise<any[]> => {
+    const data = await apiRequest<{ movements: any[] }>(`/inventory/movements/${productId}`);
+    return data.movements;
+  },
+
+  // Get losses history
+  getLosses: async (): Promise<Loss[]> => {
+    const data = await apiRequest<{ losses: Loss[] }>('/losses');
+    return data.losses;
   },
 };
 
@@ -400,6 +492,84 @@ export const ordersApi = {
 };
 
 // ========================================
+// INVOICES API
+// ========================================
+
+export const invoicesApi = {
+  create: async (invoice: any): Promise<any> => {
+    const data = await apiRequest<{ invoice: any }>('/invoices', {
+      method: 'POST',
+      body: JSON.stringify(invoice),
+    });
+    return data.invoice;
+  },
+  
+  getByOrder: async (orderId: string): Promise<any> => {
+    const data = await apiRequest<{ invoice: any }>(`/invoices/order/${orderId}`);
+    return data.invoice;
+  }
+};
+
+// ========================================
+// HELD BILLS API
+// ========================================
+
+export const heldBillsApi = {
+  getAll: async (): Promise<any[]> => {
+    const data = await apiRequest<{ bills: any[] }>('/held-bills');
+    return data.bills;
+  },
+
+  add: async (bill: any): Promise<any> => {
+    const data = await apiRequest<{ bill: any }>('/held-bills', {
+      method: 'POST',
+      body: JSON.stringify(bill),
+    });
+    return data.bill;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await apiRequest(`/held-bills/${id}`, {
+      method: 'DELETE',
+    });
+  }
+};
+
+// ========================================
+// AUDIT LOGS API
+// ========================================
+
+export const auditLogsApi = {
+  log: async (entry: any): Promise<void> => {
+    await apiRequest('/audit-logs', {
+      method: 'POST',
+      body: JSON.stringify(entry),
+    });
+  }
+};
+
+// ========================================
+// PURCHASES API
+// ========================================
+
+export const purchasesApi = {
+  // Get all purchases
+  getAll: async (): Promise<Purchase[]> => {
+    const data = await apiRequest<{ purchases: Purchase[] }>('/purchases');
+    return data.purchases;
+  },
+
+  // Add new purchase
+  add: async (purchase: Purchase): Promise<Purchase> => {
+    const data = await apiRequest<{ purchase: Purchase }>('/purchases', {
+      method: 'POST',
+      body: JSON.stringify(purchase),
+    });
+    return data.purchase;
+  },
+};
+
+// ========================================
 // REVENUE SOURCES API
 // ========================================
 
@@ -418,6 +588,60 @@ export const revenueSourcesApi = {
     });
     return data.revenueSource;
   },
+};
+
+// ========================================
+// ANALYTICS & AI INSIGHTS API
+// ========================================
+
+export const analyticsInsightsApi = {
+  getInsights: async (): Promise<any> => {
+    return await apiRequest('/analytics/ai-insights');
+  },
+
+  recordFeedback: async (insightId: string, status: 'seen' | 'ignored' | 'acted'): Promise<void> => {
+    await apiRequest('/analytics/ai-insights/feedback', {
+        method: 'POST',
+        body: JSON.stringify({ insightId, status })
+    });
+  }
+};
+
+// ========================================
+// AI API
+// ========================================
+
+export const aiApi = {
+  parseSalesNote: async (note: string, products?: Product[]): Promise<any> => {
+     // Optimize payload: only send necessary fields if passing products
+     const productContext = products?.map(p => ({
+         id: p.id, 
+         name: p.name, 
+         unit: p.unit, 
+         price: p.price 
+     }));
+     
+     const data = await apiRequest<any>('/ai/parse-sales-note', {
+       method: 'POST',
+       body: JSON.stringify({ note, products: productContext }),
+     });
+     return data;
+  },
+
+  parsePurchaseNote: async (note: string, products?: Product[]): Promise<any> => {
+     const productContext = products?.map(p => ({
+         id: p.id, 
+         name: p.name, 
+         unit: p.unit, 
+         costPrice: p.costPrice 
+     }));
+     
+     const data = await apiRequest<any>('/ai/parse-purchase-note', {
+       method: 'POST',
+       body: JSON.stringify({ note, products: productContext }),
+     });
+     return data;
+  }
 };
 
 // ========================================
@@ -465,6 +689,28 @@ export const shopSettingsApi = {
     });
     return data.settings;
   },
+
+  // Upload shop logo
+  uploadLogo: async (file: File): Promise<string> => {
+    const accessToken = await getAccessToken();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE_URL}/shop-settings/logo`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken || publicAnonKey}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to upload logo');
+    }
+
+    const data = await response.json();
+    return data.url;
+  },
 };
 
 // ========================================
@@ -480,8 +726,12 @@ export const notificationsApi = {
 
   // Get unread count
   getUnreadCount: async (): Promise<number> => {
-    const data = await apiRequest<{ count: number }>('/notifications/unread-count');
-    return data.count;
+    try {
+      const data = await apiRequest<{ count: number }>('/notifications/unread-count');
+      return data.count;
+    } catch {
+      return 0;
+    }
   },
 
   // Create notification
@@ -558,4 +808,25 @@ export const vendorsApi = {
       method: 'DELETE',
     });
   },
+};
+
+// ========================================
+// DASHBOARD API
+// ========================================
+
+export const dashboardApi = {
+  getDailyMissions: async (): Promise<DailyMission[]> => {
+    const data = await apiRequest<{ missions: DailyMission[] }>('/dashboard/daily-missions');
+    return data.missions;
+  },
+
+  getStoreHealth: async (): Promise<StoreHealth> => {
+    const data = await apiRequest<{ health: StoreHealth }>('/dashboard/store-health');
+    return data.health;
+  },
+
+  getEndOfDaySummary: async (): Promise<EndOfDaySummary> => {
+    const data = await apiRequest<{ summary: EndOfDaySummary }>('/dashboard/end-of-day-summary');
+    return data.summary;
+  }
 };

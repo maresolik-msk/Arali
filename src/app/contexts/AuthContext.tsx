@@ -11,6 +11,7 @@ import {
   type User, 
   type AuthState 
 } from '../services/auth';
+import { PricingPlan, DEFAULT_PLAN } from '../constants/pricing';
 import { supabase } from '../services/supabaseClient';
 import { toast } from 'sonner';
 import { clearTokenCache } from '../services/api';
@@ -75,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             id: session.user.id,
             email: session.user.email!,
             name: session.user.user_metadata.name || session.user.email!.split('@')[0],
+            plan: (session.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
+            hasSelectedPlan: !!session.user.user_metadata.plan_selected,
           };
           
           setUser(user);
@@ -93,6 +96,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             id: session.user.id,
             email: session.user.email!,
             name: session.user.user_metadata.name || session.user.email!.split('@')[0],
+            plan: (session.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
+            hasSelectedPlan: !!session.user.user_metadata.plan_selected,
           };
           setUser(user);
           localStorage.setItem('user', JSON.stringify(user));
@@ -215,7 +220,7 @@ export function useAuth() {
   if (context === undefined) {
     // During hot module reload, context might be temporarily unavailable
     // Return a safe default that shows loading state instead of crashing
-    console.warn('useAuth called outside AuthProvider - returning loading state');
+    // console.debug('useAuth called outside AuthProvider - returning loading state');
     return {
       user: null,
       accessToken: null,

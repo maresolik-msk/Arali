@@ -3,16 +3,26 @@ import { motion } from 'motion/react';
 import { Sparkles, TrendingUp, Package, Lightbulb, Target, BarChart3, AlertCircle, Loader, Zap, Award, ArrowUp, ArrowDown, Activity, Clock } from 'lucide-react';
 import { analyzePurchasePatterns, AIAnalysis, AnalyticsData } from '../services/ai';
 import { toast } from 'sonner';
+import { usePlan } from '../hooks/usePlan';
+import { UpgradeModal } from '../components/UpgradeModal';
 
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 export function AIInsights() {
+  const { limits } = usePlan();
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
 
   const handleAnalyze = async () => {
+    if (!limits.canForecast) {
+      setIsUpgradeModalOpen(true);
+      return;
+    }
+
     setLoading(true);
     try {
       const result = await analyzePurchasePatterns();
@@ -233,28 +243,39 @@ export function AIInsights() {
               transition={{ delay: 0.3 }}
               className="mb-4"
             >
-              <div className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/20 rounded-2xl p-5 shadow-lg">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center">
-                    <Lightbulb className="w-4 h-4 text-white" />
+              <div className="relative overflow-hidden bg-white/90 backdrop-blur-xl border border-white/60 rounded-2xl p-6 shadow-xl shadow-slate-200/50">
+                {/* Decorative background element */}
+                <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-[#0F4C81]/5 to-transparent rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+                
+                <div className="relative z-10">
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-orange-500/20 text-white">
+                      <Lightbulb className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-[#0F4C81] font-bold text-lg tracking-tight">Key Insights</h3>
+                      <p className="text-xs text-[#0F4C81]/60 font-medium">AI-powered analysis</p>
+                    </div>
                   </div>
-                  <h3 className="text-[#0F4C81] font-semibold">Key Insights</h3>
-                </div>
-                <div className="space-y-2">
-                  {analysis.insights.slice(0, 3).map((insight, index) => (
-                    <motion.div
-                      key={index}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.4 + index * 0.1 }}
-                      className="flex items-start gap-2 p-3 bg-gradient-to-r from-[#0F4C81]/5 to-transparent rounded-xl border-l-4 border-[#0F4C81]"
-                    >
-                      <div className="w-5 h-5 rounded-full bg-[#0F4C81] text-white flex items-center justify-center text-xs flex-shrink-0 mt-0.5">
-                        {index + 1}
-                      </div>
-                      <p className="text-sm text-[#082032] flex-1 leading-relaxed">{insight}</p>
-                    </motion.div>
-                  ))}
+                  
+                  <div className="space-y-3">
+                    {analysis.insights.slice(0, 3).map((insight, index) => (
+                      <motion.div
+                        key={index}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.4 + index * 0.1 }}
+                        className="group flex gap-3 p-4 bg-white/50 hover:bg-white rounded-xl border border-[#0F4C81]/5 hover:border-[#0F4C81]/20 transition-all duration-300 shadow-sm hover:shadow-md"
+                      >
+                        <div className="w-6 h-6 rounded-full bg-[#0F4C81]/10 text-[#0F4C81] flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 group-hover:bg-[#0F4C81] group-hover:text-white transition-colors duration-300">
+                          {index + 1}
+                        </div>
+                        <p className="text-sm text-[#082032]/80 leading-relaxed font-medium group-hover:text-[#082032] transition-colors">
+                          {insight}
+                        </p>
+                      </motion.div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -461,6 +482,13 @@ export function AIInsights() {
           </motion.div>
         </>
       )}
+      {/* Upgrade Modal */}
+      <UpgradeModal
+        isOpen={isUpgradeModalOpen}
+        onClose={() => setIsUpgradeModalOpen(false)}
+        title="Unlock AI Insights"
+        description="Forecasting and AI analysis are premium features. Upgrade your plan to unlock data-driven insights for your business."
+      />
     </div>
   );
 }

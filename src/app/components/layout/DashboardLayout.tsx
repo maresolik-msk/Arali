@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router';
+import svgPaths from "@/imports/svg-mkjwe92tm9";
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard,
@@ -18,12 +19,15 @@ import {
   Truck,
   Sparkles,
   ScanLine,
+  ClipboardList,
+  Zap,
 } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { Button } from '../ui/button';
 import { cn } from '../ui/utils';
 import { Toaster } from '../ui/sonner';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePlan } from '../../hooks/usePlan';
 import { NotificationCenter } from './NotificationCenter';
 import { notificationsApi, productsApi } from '../../services/api';
 import { getExpiringProducts } from '../../data/dashboardData';
@@ -43,6 +47,11 @@ const navItems = [
     title: 'Inventory',
     href: '/dashboard/inventory',
     icon: Package,
+  },
+  {
+    title: 'Purchase',
+    href: '/dashboard/purchase-notepad',
+    icon: ClipboardList,
   },
   {
     title: 'Orders',
@@ -84,6 +93,13 @@ export function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { signOut, isAuthenticated, isLoading, user } = useAuth();
+  const { limits, isEnterprise } = usePlan();
+
+  const filteredNavItems = navItems.filter(item => {
+    if (item.title === 'Analytics') return limits.canViewReports;
+    if (item.title === 'AI Insights') return limits.canForecast;
+    return true;
+  });
 
   // Load unread notification count - only after auth is ready
   useEffect(() => {
@@ -181,6 +197,13 @@ export function DashboardLayout() {
     // Navigation is now handled by the signOut function in AuthContext
   };
 
+  const mobileNavItems = [
+    { title: 'Home', href: '/dashboard', icon: LayoutDashboard },
+    { title: 'Stock', href: '/dashboard/inventory', icon: Package },
+    { title: 'POS', href: '/dashboard/pos', icon: ScanLine, special: true },
+    { title: 'Orders', href: '/dashboard/orders', icon: ShoppingCart },
+  ];
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F5F9FC] via-[#EBF4FA] to-[#F5F9FC]">
       {/* Desktop Sidebar */}
@@ -193,7 +216,7 @@ export function DashboardLayout() {
 
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-            {navItems.map((item) => {
+            {filteredNavItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(item.href);
               return (
@@ -220,6 +243,24 @@ export function DashboardLayout() {
               );
             })}
           </nav>
+
+          {/* Upgrade CTA */}
+          {!isEnterprise && (
+            <div className="px-4 pb-4">
+              <div className="bg-gradient-to-br from-[#0F4C81] to-[#1E6091] rounded-2xl p-4 text-white relative overflow-hidden shadow-lg">
+                 <div className="absolute top-0 right-0 -mr-4 -mt-4 w-20 h-20 bg-white/10 rounded-full blur-xl" />
+                 
+                 <h3 className="font-bold text-sm mb-1">Upgrade Plan</h3>
+                 <p className="text-xs text-white/80 mb-3">Get more features & limits.</p>
+                 <Link to="/select-plan?mode=upgrade">
+                   <Button size="sm" variant="secondary" className="w-full bg-white text-[#0F4C81] hover:bg-white/90 text-xs h-8 border-none">
+                     <Zap className="w-3 h-3 mr-1 fill-current" />
+                     Upgrade Now
+                   </Button>
+                 </Link>
+              </div>
+            </div>
+          )}
 
           {/* User Profile Section */}
           <div className="p-4 border-t border-[#0F4C81]/10">
@@ -296,7 +337,7 @@ export function DashboardLayout() {
 
                 {/* Navigation */}
                 <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-                  {navItems.map((item) => {
+                  {filteredNavItems.map((item) => {
                     const Icon = item.icon;
                     const active = isActive(item.href);
                     return (
@@ -317,6 +358,24 @@ export function DashboardLayout() {
                     );
                   })}
                 </nav>
+
+                {/* Upgrade CTA */}
+                {!isEnterprise && (
+                  <div className="px-4 pb-4">
+                    <div className="bg-gradient-to-br from-[#0F4C81] to-[#1E6091] rounded-2xl p-4 text-white relative overflow-hidden shadow-lg">
+                       <div className="absolute top-0 right-0 -mr-4 -mt-4 w-20 h-20 bg-white/10 rounded-full blur-xl" />
+                       
+                       <h3 className="font-bold text-sm mb-1">Upgrade Plan</h3>
+                       <p className="text-xs text-white/80 mb-3">Get more features & limits.</p>
+                       <Link to="/select-plan?mode=upgrade" onClick={() => setSidebarOpen(false)}>
+                         <Button size="sm" variant="secondary" className="w-full bg-white text-[#0F4C81] hover:bg-white/90 text-xs h-8 border-none">
+                           <Zap className="w-3 h-3 mr-1 fill-current" />
+                           Upgrade Now
+                         </Button>
+                       </Link>
+                    </div>
+                  </div>
+                )}
 
                 {/* User Profile Section */}
                 <div className="p-4 border-t border-[#0F4C81]/10">
@@ -381,10 +440,65 @@ export function DashboardLayout() {
         </header>
 
         {/* Page Content */}
-        <main className="min-h-[calc(100vh-6rem)]">
+        <main className="min-h-[calc(100vh-6rem)] pb-24 lg:pb-0">
           <Outlet />
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 px-2 sm:px-6 flex justify-between items-end pointer-events-none lg:hidden">
+        
+        {/* Left: Add Button */}
+        <Link
+          to="/dashboard/inventory?action=add"
+          className="pointer-events-auto group relative"
+        >
+          <div className="bg-[#0F4C81] w-[48px] h-[48px] sm:w-[56px] sm:h-[56px] rounded-full flex items-center justify-center shadow-[0px_8px_10px_-6px_rgba(15,76,129,0.3)] border-[4px] border-[#F5F9FC] transition-transform active:scale-95">
+             <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="scale-90 sm:scale-100">
+               <path d={svgPaths.pe998d00} fill="white" />
+             </svg>
+          </div>
+        </Link>
+    
+        {/* Center: Navigation Pill */}
+        <div className="pointer-events-auto bg-white h-[48px] sm:h-[56px] px-2 rounded-[46px] shadow-[0px_4px_24px_0px_rgba(0,0,0,0.12)] flex items-center gap-1">
+           {/* Home */}
+           <Link to="/dashboard" className={cn("w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full transition-colors", isActive('/dashboard') ? "bg-[#F0F2F4]" : "hover:bg-gray-50")}>
+             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="scale-90 sm:scale-100">
+               <path d={svgPaths.p5b53800} fill={isActive('/dashboard') ? "black" : "transparent"} stroke="black" strokeWidth="1.225" strokeOpacity={isActive('/dashboard') ? "1" : "0.5"} />
+             </svg>
+           </Link>
+    
+           {/* Stock */}
+           <Link to="/dashboard/inventory" className={cn("w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full transition-colors", isActive('/dashboard/inventory') && !location.search ? "bg-[#F0F2F4]" : "hover:bg-gray-50")}>
+             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="scale-90 sm:scale-100">
+               <path d={svgPaths.pdea4710} stroke="black" strokeLinejoin="round" strokeOpacity={isActive('/dashboard/inventory') && !location.search ? "1" : "0.5"} strokeWidth="1.4" />
+             </svg>
+           </Link>
+    
+           {/* Insights (Bulb) */}
+           <Link to="/dashboard/pos" className={cn("w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full transition-colors", isActive('/dashboard/pos') ? "bg-[#F0F2F4]" : "hover:bg-gray-50")}>
+             <ScanLine className={cn("w-5 h-5 sm:w-6 sm:h-6", isActive('/dashboard/pos') ? "text-black" : "text-black/50")} strokeWidth={1.4} />
+           </Link>
+    
+           {/* Menu */}
+           <button onClick={() => setSidebarOpen(true)} className="w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full hover:bg-gray-50">
+             <div className="flex items-center justify-center w-full h-full">
+               <svg width="18" height="12" viewBox="0 0 18 12" fill="none" className="scale-90 sm:scale-100">
+                 <path clipRule="evenodd" d={svgPaths.p2166df00} fill="black" fillOpacity="0.5" fillRule="evenodd" />
+               </svg>
+             </div>
+           </button>
+        </div>
+    
+        {/* Right: AI Button */}
+        <Link to="/dashboard/insights" className="pointer-events-auto bg-white w-[48px] h-[48px] sm:w-[56px] sm:h-[56px] rounded-full flex items-center justify-center shadow-[0px_0px_44px_0px_rgba(0,0,0,0.16)] transition-transform active:scale-95">
+           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="scale-90 sm:scale-100">
+             <path d={svgPaths.p1a0eb580} fill="#0F4C81" />
+           </svg>
+        </Link>
+      </div>
+
       <Toaster />
       <NotificationCenter
         isOpen={notificationCenterOpen}

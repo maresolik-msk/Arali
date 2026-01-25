@@ -25,9 +25,11 @@ export function DashboardSettings() {
   const [storeName, setStoreName] = React.useState('');
   const [storeAddress, setStoreAddress] = React.useState('');
   const [contactEmail, setContactEmail] = React.useState('');
+  const [storeLogo, setStoreLogo] = React.useState('');
   const [fullName, setFullName] = React.useState('John Doe');
   const [phoneNumber, setPhoneNumber] = React.useState('+1 (555) 123-4567');
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isUploading, setIsUploading] = React.useState(false);
 
   // Load shop settings on mount
   React.useEffect(() => {
@@ -37,6 +39,7 @@ export function DashboardSettings() {
         setStoreName(settings.shopName || '');
         setStoreAddress(settings.shopAddress || '');
         setContactEmail(settings.contactEmail || '');
+        setStoreLogo(settings.shopLogoUrl || '');
       } catch (error) {
         console.error('Error loading shop settings:', error);
         toast.error('Failed to load shop settings');
@@ -48,12 +51,30 @@ export function DashboardSettings() {
     loadSettings();
   }, []);
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      const url = await shopSettingsApi.uploadLogo(file);
+      setStoreLogo(url);
+      toast.success('Logo uploaded successfully');
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      toast.error('Failed to upload logo');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleSaveStoreSettings = async () => {
     try {
       await shopSettingsApi.update({
         shopName: storeName,
         shopAddress: storeAddress,
         contactEmail: contactEmail,
+        shopLogoUrl: storeLogo,
       });
       toast.success('Store settings saved successfully!');
     } catch (error) {
@@ -119,6 +140,35 @@ export function DashboardSettings() {
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="md:col-span-2">
+                  <label className="text-foreground mb-2 block">Store Logo</label>
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10 flex items-center justify-center overflow-hidden relative group">
+                      {storeLogo ? (
+                        <img src={storeLogo} alt="Store Logo" className="w-full h-full object-cover" />
+                      ) : (
+                        <Store className="w-8 h-8 text-[#0F4C81]/40" />
+                      )}
+                      <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                        <span className="text-white text-xs font-medium">Change</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={handleLogoUpload}
+                          disabled={isUploading}
+                        />
+                      </label>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-muted-foreground">
+                        Upload a logo for your store. Recommended size: 512x512px.
+                      </p>
+                      {isUploading && <p className="text-xs text-[#0F4C81] mt-1">Uploading...</p>}
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label className="text-foreground mb-2 block">Store Name</label>
                   <input
@@ -217,12 +267,23 @@ export function DashboardSettings() {
                 </div>
                 <div>
                   <label className="text-foreground mb-2 block">Phone Number</label>
-                  <input
-                    type="tel"
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    className="w-full h-12 px-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10 focus:border-[#0F4C81]/30 focus:bg-white transition-all outline-none"
-                  />
+                  <div className="relative">
+                    <div className="absolute left-0 top-0 bottom-0 px-3 bg-[#0F4C81]/10 rounded-l-xl flex items-center border-r border-[#0F4C81]/10">
+                      <span className="text-foreground font-medium text-sm flex items-center gap-1">
+                        🇮🇳 +91
+                      </span>
+                    </div>
+                    <input
+                      type="tel"
+                      value={phoneNumber.startsWith('+91 ') ? phoneNumber.slice(4) : phoneNumber}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/\D/g, '').slice(0, 10);
+                        setPhoneNumber(`+91 ${value}`);
+                      }}
+                      placeholder="98765 43210"
+                      className="w-full h-12 pl-24 pr-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10 focus:border-[#0F4C81]/30 focus:bg-white transition-all outline-none font-medium"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="flex gap-4">
