@@ -39,7 +39,7 @@ export function FAQ() {
   ];
 
   return (
-    <div className="pt-20 pb-32">
+    <div className="pt-[32px] pb-[128px] pr-[0px] pl-[0px]">
       <div className="container mx-auto px-6 max-w-2xl">
         <motion.div {...fadeInUp} className="text-center mb-16">
           <h1 className="text-4xl md:text-5xl font-semibold text-[#0F4C81] mb-6">Common Questions</h1>

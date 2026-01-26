@@ -29,7 +29,7 @@ export function WhyArali() {
   ];
 
   return (
-    <div className="pt-20 pb-32">
+    <div className="pt-[32px] pb-[128px] pr-[0px] pl-[0px]">
       <div className="container mx-auto px-6">
         <motion.div {...fadeInUp} className="text-center max-w-3xl mx-auto mb-20">
           <h1 className="text-4xl md:text-5xl font-semibold text-[#0F4C81] mb-6">Why switch to Arali?</h1>

@@ -47,7 +47,7 @@ export function HowItWorks() {
   ];
 
   return (
-    <div className="pt-20 pb-32">
+    <div className="pt-[32px] pb-[128px] pr-[0px] pl-[0px]">
       <div className="container mx-auto px-6">
         <motion.div {...fadeInUp} className="text-center max-w-3xl mx-auto mb-24">
           <h1 className="text-4xl md:text-5xl font-semibold text-[#0F4C81] mb-6">How Arali works</h1>
@@ -92,7 +92,7 @@ export function HowItWorks() {
                 transition={{ duration: 0.6 }}
                 className="flex-1"
               >
-                <span className="text-6xl font-bold text-[#0F4C81]/10 mb-4 block">{step.id}</span>
+                
                 <h2 className="text-3xl font-semibold text-[#0F4C81] mb-4">{step.title}</h2>
                 <p className="text-lg text-[#082032]/70 leading-relaxed">{step.desc}</p>
               </motion.div>

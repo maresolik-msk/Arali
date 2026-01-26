@@ -44,7 +44,7 @@ export function Features() {
   ];
 
   return (
-    <div className="pt-20 pb-32">
+    <div className="pt-[32px] pb-[128px] pr-[0px] pl-[0px]">
         {/* Hero Banner */}
         <div className="w-full h-[300px] md:h-[400px] relative overflow-hidden mb-20">
              <img 

@@ -19,7 +19,7 @@ export function PricingPage() {
       {/* Header Spacer */}
       
 
-      <div className="container mx-auto px-6 py-16">
+      <div className="container mx-auto px-6 py-16 pt-[32px] pr-[24px] pb-[64px] pl-[24px]">
         <div className="text-center max-w-3xl mx-auto mb-16">
           <h1 className="text-4xl md:text-5xl font-bold text-[#0F4C81] mb-6">
             Simple Pricing for Smart Retailers
