@@ -47,7 +47,7 @@ export function QuickAddProductModal({ isOpen, onClose, onSuccess, initialName =
         stock: parseFloat(formData.stock) || 0,
         minStock: parseFloat(formData.minStock) || 0,
         status: 'In Stock',
-        sku: `SKU-${Date.now().toString().slice(-6)}`,
+        sku: 'AUTO', // Let backend generate smart SKU
         createdAt: new Date(),
         updatedAt: new Date()
       };

@@ -1,4 +1,5 @@
-import imgImageShopOwnerManagingInventory from "figma:asset/3c6d6ca1ffe84cca39990042ae11c324407334e1.png";
+const imgImageShopOwnerManagingInventory = "https://images.unsplash.com/photo-1765744893064-dce3184289ef?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzdG9yZSUyMGludmVudG9yeXxlbnwxfHx8fDE3Njk5MzYyNzl8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral";
+
 
 function ImageShopOwnerManagingInventory() {
   return (

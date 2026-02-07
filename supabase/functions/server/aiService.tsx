@@ -88,6 +88,21 @@ function fallbackPurchaseParser(note: string, productsList: any[]) {
     let cleanLine = line.trim();
     if (!cleanLine) continue;
 
+    // Extract expiry date if present (simple regex for DD/MM/YYYY or YYYY-MM-DD or DD-MM-YYYY)
+    let expiryDate = null;
+    const dateMatch = cleanLine.match(/(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})|(\d{4}[-/]\d{1,2}[-/]\d{1,2})/);
+    if (dateMatch) {
+      expiryDate = dateMatch[0];
+      cleanLine = cleanLine.replace(dateMatch[0], '').trim();
+    } else if (cleanLine.includes('exp')) {
+        // Try to capture text after 'exp' or 'expiry'
+        const expMatch = cleanLine.match(/(?:exp|expiry)\s*:?\s*(\S+)/);
+        if (expMatch) {
+            expiryDate = expMatch[1];
+            cleanLine = cleanLine.replace(expMatch[0], '').trim();
+        }
+    }
+
     // Extract price if present (e.g., "for 500", "at 20")
     // Patterns: "for 500", "at 500", "rs 500", "500rs", "500/-"
     let costPrice = 0;
@@ -160,6 +175,7 @@ function fallbackPurchaseParser(note: string, productsList: any[]) {
       unit,
       costPrice: finalUnitCost,
       totalCost: isTotalCost ? costPrice : finalUnitCost * quantity,
+      expiryDate,
       confidence: matchedProduct ? 70 : 20
     });
   }
@@ -188,7 +204,7 @@ export async function parsePurchaseNote(note: string, productsList: any[]) {
     
     Instructions:
     1. Detect language ('en', 'te', 'mixed').
-    2. Extract product name, quantity, unit, and COST PRICE.
+    2. Extract product name, quantity, unit, COST PRICE, and EXPIRY DATE (if mentioned).
     3. Deduce unit cost from "for 500" or "at 50".
     4. Normalize units.
     5. Calculate 'confidence' (0-100).
@@ -205,6 +221,7 @@ export async function parsePurchaseNote(note: string, productsList: any[]) {
           "unit": "string",
           "costPrice": number,
           "totalCost": number,
+          "expiryDate": "YYYY-MM-DD" or "string" or null,
           "confidence": number
         }
       ],

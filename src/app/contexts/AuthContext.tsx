@@ -8,6 +8,8 @@ import {
   updatePassword, 
   requestPasswordResetOTP as authRequestPasswordResetOTP, 
   verifyOTPAndResetPassword as authVerifyOTPAndResetPassword, 
+  signInWithPhone as authSignInWithPhone,
+  verifyPhoneOtp as authVerifyPhoneOtp,
   type User, 
   type AuthState 
 } from '../services/auth';
@@ -24,6 +26,8 @@ interface AuthContextType extends AuthState {
   changePassword: (newPassword: string) => Promise<void>;
   requestPasswordResetOTP: (email: string) => Promise<void>;
   verifyOTPAndResetPassword: (email: string, otp: string, newPassword: string) => Promise<void>;
+  signInWithPhone: (phone: string) => Promise<void>;
+  verifyPhoneOtp: (phone: string, token: string) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -194,6 +198,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signInWithPhone = async (phone: string) => {
+    try {
+      await authSignInWithPhone(phone);
+    } catch (error) {
+      console.error('Phone sign in error:', error);
+      throw error;
+    }
+  };
+
+  const verifyPhoneOtp = async (phone: string, token: string) => {
+    try {
+      const authState = await authVerifyPhoneOtp(phone, token);
+      setUser(authState.user);
+      setAccessToken(authState.accessToken);
+      setIsAuthenticated(true);
+      toast.success('Welcome back!');
+    } catch (error) {
+      console.error('Phone verification error:', error);
+      throw error;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -208,6 +234,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         changePassword,
         requestPasswordResetOTP,
         verifyOTPAndResetPassword,
+        signInWithPhone,
+        verifyPhoneOtp,
       }}
     >
       {children}
@@ -233,6 +261,8 @@ export function useAuth() {
       changePassword: async () => { throw new Error('Auth not initialized'); },
       requestPasswordResetOTP: async () => { throw new Error('Auth not initialized'); },
       verifyOTPAndResetPassword: async () => { throw new Error('Auth not initialized'); },
+      signInWithPhone: async () => { throw new Error('Auth not initialized'); },
+      verifyPhoneOtp: async () => { throw new Error('Auth not initialized'); },
     };
   }
   return context;

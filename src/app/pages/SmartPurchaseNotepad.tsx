@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Switch } from '../components/ui/switch';
 import { 
   Mic, 
   Send, 
@@ -15,14 +18,14 @@ import {
   Store,
   AlertTriangle,
   Info,
-  Edit2
+  Edit2,
+  Save
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
 import { useNavigate } from 'react-router';
 import { aiApi, productsApi, purchasesApi, vendorsApi } from '../services/api';
-import type { Product, Vendor, PurchaseItem } from '../data/dashboardData';
+import type { Product, Vendor, PurchaseItem, Purchase } from '../data/dashboardData';
 import { QuickAddProductModal } from '../components/QuickAddProductModal';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 
@@ -52,9 +55,24 @@ export function SmartPurchaseNotepad() {
   // Confirmation State
   const [showConfirmation, setShowConfirmation] = useState(false);
 
-  // Quick Add Modal State
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [itemToCreate, setItemToCreate] = useState<{ id: string, name: string } | null>(null);
+  // Query State
+  const [queryResults, setQueryResults] = useState<Purchase[]>([]);
+  const [showQueryResults, setShowQueryResults] = useState(false);
+
+  // Edit Item State
+  const [editingItem, setEditingItem] = useState<PurchaseItemUI | null>(null);
+  const [editForm, setEditForm] = useState({
+    productName: '',
+    quantity: '',
+    unit: 'pcs',
+    costPrice: '',
+    expiryDate: '',
+    // New product specific
+    category: 'General',
+    sellingPrice: '',
+    sku: '',
+    addToInventory: true
+  });
 
   // Suggestions State
   const [suggestions, setSuggestions] = useState<Product[]>([]);
@@ -123,6 +141,88 @@ export function SmartPurchaseNotepad() {
     }, 0);
   };
 
+  const openEditDialog = (item: PurchaseItemUI) => {
+    setEditingItem(item);
+    setEditForm({
+      productName: item.productName,
+      quantity: item.quantity.toString(),
+      unit: item.unit,
+      costPrice: item.costPrice.toString(),
+      expiryDate: item.expiryDate || '',
+      category: 'General',
+      sellingPrice: (item.costPrice * 1.4).toFixed(2), // 40% margin default
+      sku: '',
+      addToInventory: !item.productId // Default to true if new
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingItem) return;
+
+    try {
+      let finalProductId = editingItem.productId;
+      const finalCost = parseFloat(editForm.costPrice) || 0;
+      const finalQty = parseFloat(editForm.quantity) || 1;
+
+      // Create new product if needed
+      if (!finalProductId && editForm.addToInventory) {
+        // Validation
+        if (!editForm.productName) {
+            toast.error("Product name is required");
+            return;
+        }
+
+        const newProduct: Product = {
+            id: Date.now(),
+            name: editForm.productName,
+            sku: editForm.sku || `SKU-${Date.now().toString().slice(-6)}`,
+            category: editForm.category || 'General',
+            stock: 0, // Stock will be added by the purchase logic later
+            price: parseFloat(editForm.sellingPrice) || (finalCost * 1.4),
+            costPrice: finalCost,
+            sellingPrice: parseFloat(editForm.sellingPrice) || (finalCost * 1.4),
+            expiryDate: editForm.expiryDate || undefined,
+            alertEnabled: true,
+            threshold: 5,
+            vendorType: vendors.find(v => v.id.toString() === selectedVendorId)?.name || 'Unknown',
+            unitsSold: 0,
+            revenue: 0,
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+
+        const created = await productsApi.add(newProduct);
+        finalProductId = created.id;
+        
+        // Update local products list so future lookups work
+        setProducts(prev => [...prev, created]);
+        toast.success(`Created product: ${created.name}`);
+      }
+
+      // Update parsedItems
+      setParsedItems(prev => prev.map(item => 
+        item.id === editingItem.id ? {
+            ...item,
+            productId: finalProductId || null,
+            productName: editForm.productName,
+            quantity: finalQty,
+            unit: editForm.unit,
+            costPrice: finalCost,
+            totalCost: finalQty * finalCost,
+            expiryDate: editForm.expiryDate,
+            isNew: !finalProductId
+        } : item
+      ));
+
+      setEditingItem(null);
+      toast.success("Item updated");
+
+    } catch (error) {
+        console.error("Failed to save edit:", error);
+        toast.error("Failed to update item");
+    }
+  };
+
   // Speech Recognition
   const recognitionRef = useRef<any>(null);
   
@@ -164,6 +264,17 @@ export function SmartPurchaseNotepad() {
   const handleParse = async () => {
     if (!note.trim()) return;
     
+    // Check for query intent (what did we buy?)
+    const lowerNote = note.toLowerCase();
+    const isQuery = 
+        (lowerNote.includes('what') || lowerNote.includes('show') || lowerNote.includes('list') || lowerNote.includes('history')) &&
+        (lowerNote.includes('purchase') || lowerNote.includes('buy') || lowerNote.includes('bought'));
+
+    if (isQuery) {
+        await handlePurchaseQuery();
+        return;
+    }
+    
     setIsProcessing(true);
     setAmbiguityQuestion(null);
 
@@ -193,6 +304,7 @@ export function SmartPurchaseNotepad() {
           unit: item.unit || 'pcs',
           costPrice: item.costPrice || matchedProduct?.costPrice || 0,
           totalCost: item.totalCost || (item.quantity * (item.costPrice || matchedProduct?.costPrice || 0)),
+          expiryDate: item.expiryDate || matchedProduct?.expiryDate || undefined,
           confidence: item.confidence || 0.8,
           originalText: item.originalText,
           isNew: !matchedProduct
@@ -207,6 +319,43 @@ export function SmartPurchaseNotepad() {
       toast.error('Failed to process note. Try again.');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handlePurchaseQuery = async () => {
+    setIsProcessing(true);
+    try {
+        const allPurchases = await purchasesApi.getAll();
+        
+        // Filter logic could be enhanced with AI to parse date ranges, but starting with "today" as default
+        // or just showing recent if no specific date mentioned.
+        // For "what we purchased today", we filter by today.
+        
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        
+        const filtered = allPurchases.filter(p => {
+            const pDate = new Date(p.createdAt);
+            // If user specifically asked for today
+            if (note.toLowerCase().includes('today')) {
+                return pDate >= today;
+            }
+            // Default: Show last 7 days or 10 items
+            return true; 
+        }).sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 10);
+
+        if (filtered.length === 0) {
+            toast.info("No purchases found for the specified period.");
+        } else {
+            setQueryResults(filtered);
+            setShowQueryResults(true);
+            setNote(''); 
+        }
+    } catch (e) {
+        console.error("Query failed", e);
+        toast.error("Failed to fetch purchase history");
+    } finally {
+        setIsProcessing(false);
     }
   };
 
@@ -234,16 +383,62 @@ export function SmartPurchaseNotepad() {
 
   const handleConfirmPurchase = async () => {
     if (parsedItems.length === 0) return;
+    
+    // Show processing indicator if possible (reusing isProcessing for UI feedback)
+    setIsProcessing(true);
 
     try {
       const selectedVendor = vendors.find(v => v.id.toString() === selectedVendorId);
 
-      // 1. Create Purchase Record
+      // 1. Pre-process items: Create new products sequentially to avoid race conditions
+      const finalItems = [];
+      for (const item of parsedItems) {
+        if (!item.productId) {
+           // Auto-create product
+           const finalCost = item.costPrice || 0;
+           const newProduct: Product = {
+                id: Date.now() + Math.floor(Math.random() * 1000), 
+                name: item.productName,
+                sku: `SKU-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 100)}`,
+                category: 'General',
+                stock: 0, // Stock will be added by the purchase logic
+                price: finalCost * 1.4, // Default selling price 
+                costPrice: finalCost,
+                sellingPrice: finalCost * 1.4,
+                expiryDate: item.expiryDate || undefined,
+                alertEnabled: true,
+                threshold: 5,
+                vendorType: selectedVendor ? selectedVendor.name : 'Unknown',
+                unitsSold: 0,
+                revenue: 0,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+
+            try {
+                const created = await productsApi.add(newProduct);
+                setProducts(prev => [...prev, created]);
+                
+                finalItems.push({
+                    ...item,
+                    productId: created.id,
+                    isNew: false
+                });
+            } catch (err) {
+                console.error("Failed to auto-create product:", item.productName, err);
+                finalItems.push(item);
+            }
+        } else {
+            finalItems.push(item);
+        }
+      }
+
+      // 2. Create Purchase Record
       const purchase = {
           id: `PUR-${Date.now()}`,
           vendorId: selectedVendor ? selectedVendor.id : undefined,
           vendorName: selectedVendor ? selectedVendor.name : 'Unknown Vendor',
-          items: parsedItems.map(({ id, isNew, confidence, originalText, ...rest }) => rest),
+          items: finalItems.map(({ id, isNew, confidence, originalText, ...rest }) => rest),
           totalAmount: calculateTotal(),
           createdAt: new Date(),
           notes: 'Added via Smart Purchase Notepad'
@@ -260,6 +455,8 @@ export function SmartPurchaseNotepad() {
     } catch (error) {
       console.error('Purchase error:', error);
       toast.error('Failed to record purchase.');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -292,55 +489,7 @@ export function SmartPurchaseNotepad() {
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* Header */}
-      <div className="bg-white border-b px-4 py-4 sticky top-0 z-10 shadow-sm">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard/inventory')}>
-            <ArrowLeft className="w-5 h-5 text-gray-500" />
-          </Button>
-          <div className="flex-1">
-            <h1 className="text-lg font-bold text-gray-900">Purchase Notepad</h1>
-          </div>
-          
-          <div className="relative">
-             <Button 
-                variant="outline" 
-                size="sm" 
-                className={`gap-2 ${selectedVendorId ? 'border-[#0F4C81] text-[#0F4C81]' : 'text-gray-500'}`}
-                onClick={() => setShowVendorSelect(!showVendorSelect)}
-             >
-                <Store className="w-4 h-4" />
-                {selectedVendorId ? vendors.find(v => v.id.toString() === selectedVendorId)?.name : 'Select Vendor'}
-             </Button>
-             
-             {showVendorSelect && (
-                 <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-xl border p-2 z-50 max-h-64 overflow-y-auto">
-                     {vendors.length === 0 && <div className="p-2 text-sm text-gray-500">No vendors found</div>}
-                     {vendors.map(v => (
-                         <div 
-                            key={v.id} 
-                            className="p-2 hover:bg-gray-100 rounded cursor-pointer text-sm font-medium"
-                            onClick={() => {
-                                setSelectedVendorId(v.id.toString());
-                                setShowVendorSelect(false);
-                            }}
-                         >
-                             {v.name}
-                         </div>
-                     ))}
-                     <div 
-                        className="p-2 hover:bg-gray-100 rounded cursor-pointer text-sm text-gray-500 border-t mt-1"
-                        onClick={() => {
-                            setSelectedVendorId('');
-                            setShowVendorSelect(false);
-                        }}
-                     >
-                         Unknown Vendor
-                     </div>
-                 </div>
-             )}
-          </div>
-        </div>
-      </div>
+      
 
       <div className="max-w-md mx-auto p-4 space-y-6">
         
@@ -450,16 +599,30 @@ export function SmartPurchaseNotepad() {
                 <div key={idx} className={`flex flex-col gap-2 p-3 rounded-lg border ${item.isNew ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100'}`}>
                     <div className="flex justify-between items-start">
                         <div>
-                            <p className="font-medium text-gray-900">{item.productName}</p>
-                            {item.isNew && <span className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded">New Product</span>}
+                            <div className="flex items-center gap-2">
+                                <p className="font-medium text-gray-900">{item.productName}</p>
+                                {item.isNew && <span className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded">New Product</span>}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">"{item.originalText}"</p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right flex flex-col items-end gap-1">
                             <span className="font-bold">{item.quantity} {item.unit}</span>
+                            <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="h-6 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                onClick={() => openEditDialog(item)}
+                            >
+                                <Edit2 className="w-3 h-3 mr-1" /> Edit
+                            </Button>
                         </div>
                     </div>
                     <div className="flex justify-between items-center text-sm text-gray-500 border-t border-dashed border-gray-200 pt-2">
-                        <span>Cost: ₹{item.costPrice}/unit</span>
-                        <span className="font-semibold text-gray-700">Total: ₹{item.totalCost}</span>
+                        <div className="flex gap-4">
+                            <span>Cost: ₹{item.costPrice}/unit</span>
+                            {item.expiryDate && <span className="text-red-500 text-xs mt-0.5">Exp: {item.expiryDate}</span>}
+                        </div>
+                        <span className="font-semibold text-gray-700">Total: ₹{item.totalCost.toFixed(2)}</span>
                     </div>
                 </div>
                 ))}
@@ -475,9 +638,6 @@ export function SmartPurchaseNotepad() {
             <Button variant="outline" onClick={() => setShowConfirmation(false)} className="flex-1">
               Cancel
             </Button>
-            <Button variant="secondary" onClick={() => setShowConfirmation(false)} className="flex-1">
-              <Edit2 className="w-4 h-4 mr-2" /> Edit
-            </Button>
             <Button onClick={handleConfirmPurchase} className="flex-[2] bg-[#0F4C81] hover:bg-[#0d3f6a]">
               Confirm
             </Button>
@@ -485,12 +645,192 @@ export function SmartPurchaseNotepad() {
         </DialogContent>
       </Dialog>
       
-      <QuickAddProductModal 
-        isOpen={showAddModal} 
-        onClose={() => setShowAddModal(false)}
-        initialName={itemToCreate?.name}
-        onSuccess={handleProductCreated}
-      />
+      {/* Query Results Modal */}
+      <Dialog open={showQueryResults} onOpenChange={setShowQueryResults}>
+        <DialogContent className="sm:max-w-lg p-0 overflow-hidden bg-white">
+          <div className="bg-[#0F4C81] p-4 text-white">
+              <DialogTitle className="flex items-center gap-2 text-white">
+                  <Search className="w-5 h-5" />
+                  Purchase History
+              </DialogTitle>
+              <DialogDescription className="text-blue-100">
+                  Found {queryResults.length} recent purchases.
+              </DialogDescription>
+          </div>
+          
+          <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto">
+            {queryResults.map((purchase) => (
+                <div key={purchase.id} className="border rounded-lg p-3 bg-gray-50">
+                    <div className="flex justify-between items-start mb-2">
+                        <div>
+                            <p className="font-bold text-[#0F4C81]">
+                                {new Date(purchase.createdAt).toLocaleDateString()} 
+                                <span className="text-xs font-normal text-gray-500 ml-2">
+                                    {new Date(purchase.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </span>
+                            </p>
+                            <p className="text-sm text-gray-600">{purchase.vendorName || 'Unknown Vendor'}</p>
+                        </div>
+                        <div className="text-right">
+                            <span className="font-bold">₹{purchase.totalAmount.toLocaleString()}</span>
+                        </div>
+                    </div>
+                    <div className="space-y-1 pl-2 border-l-2 border-gray-200">
+                        {purchase.items.map((item, idx) => (
+                            <div key={idx} className="flex justify-between text-sm">
+                                <span>{item.quantity} {item.unit} x {item.productName}</span>
+                                <span className="text-gray-500">₹{item.totalCost}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ))}
+          </div>
+
+          <DialogFooter className="p-4 bg-gray-50">
+            <Button onClick={() => setShowQueryResults(false)} className="w-full bg-[#0F4C81]">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Item Dialog */}
+      <Dialog open={!!editingItem} onOpenChange={(open) => !open && setEditingItem(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Purchase Item</DialogTitle>
+            <DialogDescription>
+              {editingItem?.isNew ? 'Define new product details for inventory.' : 'Update purchase details.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="name"
+                value={editForm.productName}
+                onChange={(e) => setEditForm({ ...editForm, productName: e.target.value })}
+                className="col-span-3"
+                disabled={!editingItem?.isNew} // Only edit name if it's new
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="qty" className="text-right">
+                Qty
+              </Label>
+              <div className="col-span-3 flex gap-2">
+                <Input
+                  id="qty"
+                  type="number"
+                  value={editForm.quantity}
+                  onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                  className="flex-1"
+                />
+                <Input
+                  value={editForm.unit}
+                  onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })}
+                  className="w-20"
+                  placeholder="Unit"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="cost" className="text-right">
+                Cost (₹)
+              </Label>
+              <Input
+                id="cost"
+                type="number"
+                value={editForm.costPrice}
+                onChange={(e) => setEditForm({ ...editForm, costPrice: e.target.value })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="expiry" className="text-right">
+                Expiry
+              </Label>
+              <Input
+                id="expiry"
+                type="date"
+                value={editForm.expiryDate}
+                onChange={(e) => setEditForm({ ...editForm, expiryDate: e.target.value })}
+                className="col-span-3"
+              />
+            </div>
+
+            {/* New Product Fields */}
+            {editingItem?.isNew && (
+                <>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="inventory" className="text-right">
+                            Inventory
+                        </Label>
+                        <div className="col-span-3 flex items-center gap-2">
+                            <Switch 
+                                id="inventory" 
+                                checked={editForm.addToInventory}
+                                onCheckedChange={(c) => setEditForm({ ...editForm, addToInventory: c })}
+                            />
+                            <span className="text-sm text-gray-500">Add to product list</span>
+                        </div>
+                    </div>
+
+                    {editForm.addToInventory && (
+                        <>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="category" className="text-right">
+                                    Category
+                                </Label>
+                                <Input
+                                    id="category"
+                                    value={editForm.category}
+                                    onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                                    className="col-span-3"
+                                    placeholder="e.g. Groceries"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="sell" className="text-right">
+                                    Sell Price
+                                </Label>
+                                <Input
+                                    id="sell"
+                                    type="number"
+                                    value={editForm.sellingPrice}
+                                    onChange={(e) => setEditForm({ ...editForm, sellingPrice: e.target.value })}
+                                    className="col-span-3"
+                                    placeholder="Recommended selling price"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="sku" className="text-right">
+                                    SKU
+                                </Label>
+                                <Input
+                                    id="sku"
+                                    placeholder="Auto-generated if empty"
+                                    value={editForm.sku}
+                                    onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })}
+                                    className="col-span-3"
+                                />
+                            </div>
+                        </>
+                    )}
+                </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={handleSaveEdit}>
+                <Save className="w-4 h-4 mr-2" />
+                Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

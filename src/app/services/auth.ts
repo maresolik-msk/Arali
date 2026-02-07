@@ -10,6 +10,7 @@ import { PricingPlan, DEFAULT_PLAN } from '../constants/pricing';
 export interface User {
   id: string;
   email: string;
+  phone?: string;
   name: string;
   plan: PricingPlan;
   hasSelectedPlan?: boolean;
@@ -75,15 +76,29 @@ export async function signUp(email: string, password: string, name: string): Pro
   const data = await response.json();
   
   // After signup, sign in to get the access token
-  const authData = await signIn(email, password);
-  return authData.user;
+  // We add a small delay to ensure database propagation
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  try {
+    const authData = await signIn(email, password);
+    return authData.user;
+  } catch (error) {
+    console.warn('[Auth] Auto-login after signup failed:', error);
+    // If auto-login fails, return the created user object anyway
+    // The user will be redirected to login page by the app flow
+    return {
+      id: data.user.id,
+      email: data.user.email,
+      name: data.user.name,
+      plan: DEFAULT_PLAN,
+      hasSelectedPlan: false,
+    };
+  }
 }
 
 // Sign in user
 export async function signIn(email: string, password: string): Promise<AuthState> {
   console.log('Attempting Supabase sign in with:', email);
-  console.log('Supabase URL:', supabaseUrl);
-  console.log('Public Key exists:', !!publicAnonKey);
   
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
@@ -91,7 +106,12 @@ export async function signIn(email: string, password: string): Promise<AuthState
   });
 
   if (error) {
-    console.error('Supabase sign in error:', error);
+    // Suppress console error for expected invalid credentials to reduce noise
+    if (error.message === 'Invalid login credentials') {
+       console.log('[Auth] Invalid login credentials for:', email);
+    } else {
+       console.error('Supabase sign in error:', error);
+    }
     throw new Error(error.message || 'Sign in failed');
   }
 
@@ -360,4 +380,70 @@ export async function verifyOTPAndResetPassword(
 
   const data = await response.json();
   return data;
+}
+
+// ========================================
+// PHONE AUTHENTICATION
+// ========================================
+
+// Sign in with Phone (Sends OTP)
+export async function signInWithPhone(phone: string): Promise<void> {
+  // Ensure the phone number is clean
+  const cleanPhone = phone.trim();
+  console.log('[Auth] Attempting phone sign in with formatted number:', cleanPhone);
+  
+  const { error } = await supabase.auth.signInWithOtp({
+    phone: cleanPhone,
+    options: {
+      shouldCreateUser: true
+    }
+  });
+
+  if (error) {
+    console.error('Phone sign in error:', error);
+    // Explicitly check for the 60200 error to provide a better message
+    if (error.message?.includes('Invalid parameter') || JSON.stringify(error).includes('60200')) {
+       // This error often comes from Twilio when the number is not verified (on trial accounts) or truly invalid
+       throw new Error(`Provider rejected '${cleanPhone}'. If you are on a free tier, ensure the number is verified.`);
+    }
+    throw new Error(error.message || 'Failed to send OTP');
+  }
+}
+
+// Verify Phone OTP
+export async function verifyPhoneOtp(phone: string, token: string): Promise<AuthState> {
+  const { data, error } = await supabase.auth.verifyOtp({
+    phone,
+    token,
+    type: 'sms',
+  });
+
+  if (error) {
+    console.error('Verify Phone OTP error:', error);
+    throw new Error(error.message || 'Invalid code');
+  }
+
+  if (!data.session) {
+    throw new Error('Verification successful but no session created');
+  }
+  
+  const user: User = {
+    id: data.user.id,
+    email: data.user.email || '',
+    phone: data.user.phone,
+    name: data.user.user_metadata.name || 'User',
+    plan: (data.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
+    hasSelectedPlan: !!data.user.user_metadata.plan_selected,
+  };
+
+  // Store auth state
+  localStorage.setItem('auth_token', data.session.access_token);
+  localStorage.setItem('user', JSON.stringify(user));
+  sessionStorage.setItem('access_token', data.session.access_token);
+
+  return {
+    user,
+    accessToken: data.session.access_token,
+    isAuthenticated: true,
+  };
 }

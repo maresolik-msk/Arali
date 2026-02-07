@@ -13,7 +13,12 @@ const app = new Hono();
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
+  }
+});
 
 // Pricing Plan Limits (Hard Enforcement)
 const PLAN_LIMITS: Record<string, { maxSkus: number }> = {
@@ -161,8 +166,11 @@ async function verifyAuth(authHeader: string | null) {
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   
   if (error || !user) {
-    // Only log if it's not a token expiration error (which is expected and handled by frontend)
-    const isTokenExpired = error?.message?.includes('expired') || error?.message?.includes('JWT');
+    // Only log if it's not a token expiration error or "Auth session missing" (which can happen with invalid tokens)
+    const isTokenExpired = error?.message?.includes('expired') || 
+                           error?.message?.includes('JWT') || 
+                           error?.message?.includes('session missing');
+                           
     if (!isTokenExpired) {
       console.error("Auth verification error:", error?.message || "User not found");
     }
@@ -198,6 +206,15 @@ app.post("/make-server-29b58f9a/init", async (c) => {
     return c.json({ error: "Failed to initialize database", details: String(error) }, 500);
   }
 });
+
+// Helper to generate SKU for internal training & optimization
+function generateSmartSKU(name: string, category: string): string {
+  const catPrefix = (category || 'GEN').substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X');
+  const namePrefix = (name || 'PRO').substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X');
+  const timestamp = Date.now().toString().slice(-4);
+  const random = Math.random().toString(36).substring(2, 4).toUpperCase();
+  return `${catPrefix}-${namePrefix}-${timestamp}${random}`;
+}
 
 // ========================================
 // PRODUCTS ENDPOINTS
@@ -241,6 +258,20 @@ app.post("/make-server-29b58f9a/products", async (c) => {
         error: "PLAN_LIMIT_EXCEEDED", 
         message: `You have reached the maximum of ${limit} products allowed on your ${plan} plan.` 
       }, 403);
+    }
+
+    // Auto-generate SKU if missing or placeholder
+    if (!product.sku || product.sku === 'AUTO' || product.sku.startsWith('SKU-')) {
+        const originalSku = product.sku;
+        product.sku = generateSmartSKU(product.name, product.category);
+        
+        // Log for internal training purposes
+        console.log(`[TRAINING_DATA] SKU Auto-Generated: ${originalSku} -> ${product.sku}`, {
+            productName: product.name,
+            category: product.category,
+            user: user.email,
+            timestamp: new Date().toISOString()
+        });
     }
 
     productsList.push(product);
@@ -486,9 +517,9 @@ app.post("/make-server-29b58f9a/sales/batch", async (c) => {
     
     // 1. Validation Phase
     for (const item of items) {
-      const product = productsList.find((p: any) => p.id === item.productId);
+      const product = productsList.find((p: any) => String(p.id) === String(item.productId));
       if (!product) return c.json({ error: `Product not found: ${item.productId}` }, 404);
-      if (product.stock < item.quantity) {
+      if (Number(product.stock) < Number(item.quantity)) {
         return c.json({ error: `Insufficient stock for ${product.name}` }, 400);
       }
     }
@@ -500,18 +531,19 @@ app.post("/make-server-29b58f9a/sales/batch", async (c) => {
     const timestamp = new Date().toISOString();
 
     for (const item of items) {
-      const index = productsList.findIndex((p: any) => p.id === item.productId);
+      const index = productsList.findIndex((p: any) => String(p.id) === String(item.productId));
       const product = productsList[index];
+      const qty = Number(item.quantity);
       
       // Update Stock
-      product.stock -= item.quantity;
-      product.unitsSold = (product.unitsSold || 0) + item.quantity;
-      product.revenue = (product.revenue || 0) + (item.quantity * product.price); // Assumes price is selling price
+      product.stock = Number(product.stock) - qty;
+      product.unitsSold = (Number(product.unitsSold) || 0) + qty;
+      product.revenue = (Number(product.revenue) || 0) + (qty * Number(product.price)); // Assumes price is selling price
       product.updatedAt = new Date();
 
       // Deduct batches (FIFO)
       if (product.batches && product.batches.length > 0) {
-        let remaining = item.quantity;
+        let remaining = qty;
         const sortedBatches = [...product.batches].sort((a: any, b: any) => {
             if (!a.expiryDate) return 1;
             if (!b.expiryDate) return -1;
@@ -571,7 +603,7 @@ app.post("/make-server-29b58f9a/purchases/batch", async (c) => {
     // 1. Validation Phase
     for (const item of items) {
         if (item.productId) {
-            const product = productsList.find((p: any) => p.id === item.productId);
+            const product = productsList.find((p: any) => String(p.id) === String(item.productId));
             if (!product) return c.json({ error: `Product not found: ${item.productId}` }, 404);
         }
         // If productId is null, it's a new product, which we might support or skip. 
@@ -588,22 +620,29 @@ app.post("/make-server-29b58f9a/purchases/batch", async (c) => {
     for (const item of items) {
       if (!item.productId) continue;
 
-      const index = productsList.findIndex((p: any) => p.id === item.productId);
+      const index = productsList.findIndex((p: any) => String(p.id) === String(item.productId));
       const product = productsList[index];
+      const qty = Number(item.quantity);
+      const cost = Number(item.costPrice);
       
       // Update Stock
-      product.stock += item.quantity;
+      const currentStock = Number(product.stock) || 0;
+      product.stock = currentStock + qty;
       
       // Update Cost Price (Weighted Average)
-      if (item.costPrice > 0) {
-          const totalValue = (product.stock * product.costPrice) + (item.quantity * item.costPrice);
-          const totalQty = product.stock + item.quantity; // Note: stock already updated above? No, wait.
+      if (cost > 0) {
           // Correct weighted avg calc:
-          // We added item.quantity to product.stock. So old stock was product.stock - item.quantity.
-          const oldStock = product.stock - item.quantity;
-          const oldTotalValue = oldStock * product.costPrice;
-          const newTotalValue = oldTotalValue + (item.quantity * item.costPrice);
-          product.costPrice = newTotalValue / product.stock;
+          // The stock update just happened above, so product.stock includes the new qty.
+          // We need old stock for WAC calculation.
+          const oldStock = currentStock; 
+          const currentCost = Number(product.costPrice) || 0;
+          
+          const oldTotalValue = oldStock * currentCost;
+          const newTotalValue = oldTotalValue + (qty * cost);
+          
+          if (product.stock > 0) {
+             product.costPrice = parseFloat((newTotalValue / product.stock).toFixed(2));
+          }
       }
       
       product.updatedAt = new Date();
@@ -614,9 +653,9 @@ app.post("/make-server-29b58f9a/purchases/batch", async (c) => {
           id: `batch-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           batchNumber: `AI-${transactionId}`,
           expiryDate: null, // AI might parse this later
-          quantity: item.quantity,
+          quantity: qty,
           receivedDate: timestamp,
-          originalQuantity: item.quantity
+          originalQuantity: qty
       });
 
       // Record Movement
@@ -626,7 +665,7 @@ app.post("/make-server-29b58f9a/purchases/batch", async (c) => {
         productId: item.productId,
         productName: product.name,
         type: 'restock',
-        quantity: item.quantity,
+        quantity: qty,
         reason: 'Smart Notepad Purchase',
         date: timestamp
       });
@@ -1130,87 +1169,7 @@ app.put("/make-server-29b58f9a/orders/:id/status", async (c) => {
   }
 });
 
-// ========================================
-// PURCHASES ENDPOINTS
-// ========================================
 
-app.get("/make-server-29b58f9a/purchases", async (c) => {
-  try {
-    // Verify authentication
-    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
-    if (authError || !user) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-
-    const purchases = await kv.get(getUserKey(user.id, 'purchases'));
-    return c.json({ purchases: purchases || [] });
-  } catch (error) {
-    console.error("Error fetching purchases:", error);
-    return c.json({ error: "Failed to fetch purchases", details: String(error) }, 500);
-  }
-});
-
-app.post("/make-server-29b58f9a/purchases", async (c) => {
-  try {
-    // Verify authentication
-    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
-    if (authError || !user) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-
-    const purchase = await c.req.json();
-    const purchases = await kv.get(getUserKey(user.id, 'purchases'));
-    const purchasesList = Array.isArray(purchases) ? purchases : [];
-    
-    // Add purchase to list
-    purchasesList.push(purchase);
-    await kv.set(getUserKey(user.id, 'purchases'), purchasesList);
-    
-    // Also update product stock for each item in the purchase
-    if (purchase.items && Array.isArray(purchase.items)) {
-      const products = await kv.get(getUserKey(user.id, 'products'));
-      const productsList = Array.isArray(products) ? products : [];
-      let productsUpdated = false;
-      
-      for (const item of purchase.items) {
-        if (!item.productId) continue;
-        
-        const productIndex = productsList.findIndex((p: any) => p.id === item.productId);
-        if (productIndex !== -1) {
-          // Increase stock
-          const product = productsList[productIndex];
-          const oldStock = product.stock || 0;
-          const addedQty = item.quantity || 0;
-          const newStock = oldStock + addedQty;
-          
-          product.stock = newStock;
-          
-          // Update cost price if provided (weighted average)
-          if (item.costPrice && item.costPrice > 0) {
-             const oldCost = product.costPrice || 0;
-             const totalValue = (oldStock * oldCost) + (addedQty * item.costPrice);
-             // Avoid division by zero if newStock is 0 (shouldn't happen here but safe)
-             const newCost = newStock > 0 ? totalValue / newStock : item.costPrice;
-             product.costPrice = parseFloat(newCost.toFixed(2));
-          }
-          
-          product.updatedAt = new Date().toISOString();
-          productsUpdated = true;
-        }
-      }
-      
-      if (productsUpdated) {
-        await kv.set(getUserKey(user.id, 'products'), productsList);
-      }
-    }
-    
-    console.log('Purchase added:', purchase.id, 'for user:', user.email);
-    return c.json({ purchase });
-  } catch (error) {
-    console.error("Error adding purchase:", error);
-    return c.json({ error: "Failed to add purchase", details: String(error) }, 500);
-  }
-});
 
 // ========================================
 // REVENUE SOURCES ENDPOINTS
@@ -2762,13 +2721,16 @@ app.post("/make-server-29b58f9a/purchases", async (c) => {
     if (purchase.items && Array.isArray(purchase.items)) {
         purchase.items.forEach((item: any) => {
             if (item.productId) {
-                const productIndex = productsList.findIndex((p: any) => p.id === item.productId);
+                // Use robust ID matching (handle string/number mismatch)
+                const productIndex = productsList.findIndex((p: any) => String(p.id) === String(item.productId));
+                
                 if (productIndex !== -1) {
                     const product = productsList[productIndex];
-                    const currentStock = product.stock || 0;
-                    const currentCost = product.costPrice || 0;
-                    const newQty = item.quantity || 0;
-                    const newCost = item.costPrice || 0;
+                    const currentStock = Number(product.stock) || 0;
+                    const currentCost = Number(product.costPrice) || 0;
+                    
+                    const newQty = Number(item.quantity) || 0;
+                    const newCost = Number(item.costPrice) || 0;
                     
                     // WAC Calculation
                     let avgCost = currentCost;
@@ -2829,6 +2791,371 @@ app.post("/make-server-29b58f9a/analytics/ai-insights/feedback", async (c) => {
   } catch (error) {
     console.error("Error recording feedback:", error);
     return c.json({ error: "Failed to record feedback" }, 500);
+  }
+});
+
+// ========================================
+// HELD BILLS ENDPOINTS
+// ========================================
+
+app.get("/make-server-29b58f9a/held-bills", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const bills = await kv.get(getUserKey(user.id, 'heldBills'));
+    return c.json({ bills: bills || [] });
+  } catch (error) {
+    console.error("Error fetching held bills:", error);
+    return c.json({ error: "Failed to fetch held bills", details: String(error) }, 500);
+  }
+});
+
+app.post("/make-server-29b58f9a/held-bills", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const bill = await c.req.json();
+    const bills = await kv.get(getUserKey(user.id, 'heldBills'));
+    const billsList = Array.isArray(bills) ? bills : [];
+    
+    // Check if ID exists, if not generate one
+    if (!bill.id) {
+       bill.id = `bill-${Date.now()}`;
+    }
+    
+    // Add or update
+    const index = billsList.findIndex((b: any) => b.id === bill.id);
+    if (index !== -1) {
+        billsList[index] = bill;
+    } else {
+        billsList.push(bill);
+    }
+    
+    await kv.set(getUserKey(user.id, 'heldBills'), billsList);
+    
+    console.log('Held bill saved:', bill.id, 'for user:', user.email);
+    return c.json({ bill });
+  } catch (error) {
+    console.error("Error saving held bill:", error);
+    return c.json({ error: "Failed to save held bill", details: String(error) }, 500);
+  }
+});
+
+app.delete("/make-server-29b58f9a/held-bills/:id", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const id = c.req.param('id');
+    const bills = await kv.get(getUserKey(user.id, 'heldBills'));
+    const billsList = Array.isArray(bills) ? bills : [];
+    
+    const filteredBills = billsList.filter((b: any) => b.id !== id);
+    await kv.set(getUserKey(user.id, 'heldBills'), filteredBills);
+    
+    console.log('Held bill deleted:', id, 'for user:', user.email);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting held bill:", error);
+    return c.json({ error: "Failed to delete held bill", details: String(error) }, 500);
+  }
+});
+
+// ========================================
+// BUSINESS VERIFICATION ENDPOINTS
+// ========================================
+
+app.post("/make-server-29b58f9a/business/verify", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const body = await c.req.parseBody();
+    const documentType = body['documentType'] as string;
+    const documentNumber = body['documentNumber'] as string;
+    const file = body['file'];
+
+    if (!documentType) {
+      return c.json({ error: "Document type is required" }, 400);
+    }
+
+    // 1. Store the document if provided
+    let documentUrl = '';
+    if (file && file instanceof File) {
+      const bucketName = 'make-29b58f9a-verification-docs';
+      // Ensure bucket exists (private)
+      const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+      if (!buckets?.some(b => b.name === bucketName)) {
+        await supabaseAdmin.storage.createBucket(bucketName, { public: false });
+      }
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/${documentType}-${Date.now()}.${fileExt}`;
+      const arrayBuffer = await file.arrayBuffer();
+      
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from(bucketName)
+        .upload(fileName, new Uint8Array(arrayBuffer), {
+          contentType: file.type,
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+      
+      // We don't need a signed URL for internal processing, but let's generate one for record
+      const { data: signedUrl } = await supabaseAdmin.storage
+        .from(bucketName)
+        .createSignedUrl(fileName, 315360000);
+        
+      documentUrl = signedUrl?.signedUrl || '';
+    }
+
+    // 2. Verification Logic (Simulated)
+    let status = 'PENDING';
+    let level = 'BASIC';
+    let message = '';
+
+    // GST & UDYAM are automated
+    if (documentType === 'GST' || documentType === 'UDYAM') {
+      if (documentNumber && documentNumber.length > 5) {
+        // Mock successful validation
+        status = 'VERIFIED';
+        level = 'DOCUMENT';
+        message = 'Automated verification successful';
+      } else {
+         status = 'REJECTED';
+         message = 'Invalid document number format';
+      }
+    } 
+    // Licenses need manual/OCR review (Simulated OCR)
+    else if (documentType === 'SHOP_LICENSE' || documentType === 'TRADE_LICENSE') {
+      if (file) {
+         // Mock OCR Confidence
+         const confidence = Math.random() * 100;
+         if (confidence > 80) {
+             status = 'VERIFIED';
+             level = 'DOCUMENT';
+             message = 'OCR Verification successful (Simulated)';
+         } else {
+             status = 'PENDING'; // Needs manual review
+             level = 'BASIC'; // Still basic until confirmed
+             message = 'Under manual review';
+         }
+      } else {
+          status = 'REJECTED';
+          message = 'Document file required';
+      }
+    }
+
+    // 3. Update Shop Settings
+    const existingSettings = await kv.get(getUserKey(user.id, 'shopSettings')) || {};
+    const updatedSettings = {
+      ...existingSettings,
+      verificationStatus: status,
+      verificationLevel: level,
+      verificationMessage: message,
+      gstIn: documentType === 'GST' ? documentNumber : existingSettings.gstIn,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(getUserKey(user.id, 'shopSettings'), updatedSettings);
+
+    // 4. Log Audit
+    const auditLog = {
+      id: `audit-${Date.now()}`,
+      action: 'BUSINESS_VERIFICATION',
+      details: `Submitted ${documentType}`,
+      status: status,
+      userId: user.id,
+      timestamp: new Date().toISOString()
+    };
+    // await kv.logAudit... (Assuming implementation exists or we just log to console for now)
+    console.log('Audit:', auditLog);
+
+    return c.json({ success: true, status, message });
+
+  } catch (error) {
+    console.error("Verification error:", error);
+    return c.json({ error: "Verification failed", details: String(error) }, 500);
+  }
+});
+
+app.get("/make-server-29b58f9a/business/verification-status", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const settings = await kv.get(getUserKey(user.id, 'shopSettings'));
+    return c.json({ 
+      status: settings?.verificationStatus || 'UNVERIFIED',
+      level: settings?.verificationLevel || 'BASIC' 
+    });
+  } catch (error) {
+    return c.json({ error: "Failed to fetch status" }, 500);
+  }
+});
+
+
+// ========================================
+// EXPRESS MODE ENDPOINTS
+// ========================================
+
+// Get Express Mode Configuration
+app.get("/make-server-29b58f9a/express/config", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const config = await kv.get(getUserKey(user.id, 'express_config')) || { pinnedItemIds: [] };
+    return c.json({ config });
+  } catch (error) {
+    console.error("Error fetching express config:", error);
+    return c.json({ error: "Failed to fetch config" }, 500);
+  }
+});
+
+// Update Express Mode Configuration
+app.post("/make-server-29b58f9a/express/config", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const { pinnedItemIds } = await c.req.json();
+    if (!Array.isArray(pinnedItemIds)) {
+      return c.json({ error: "Invalid pinnedItemIds" }, 400);
+    }
+
+    await kv.set(getUserKey(user.id, 'express_config'), { pinnedItemIds });
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error updating express config:", error);
+    return c.json({ error: "Failed to update config" }, 500);
+  }
+});
+
+// Record Express Sale (Single Tap)
+app.post("/make-server-29b58f9a/express/sale", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    const { productId, quantity } = await c.req.json();
+    const qty = Number(quantity) || 1;
+
+    // 1. Fetch Data
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    
+    // Fetch Orders to record revenue
+    const orders = await kv.get(getUserKey(user.id, 'orders'));
+    const ordersList = Array.isArray(orders) ? orders : [];
+    
+    const index = productsList.findIndex((p: any) => p.id === productId);
+    if (index === -1) return c.json({ error: "Product not found" }, 404);
+    
+    const product = productsList[index];
+
+    // 2. Update Inventory (Non-blocking, optimistic in UI, but enforced here)
+    // Note: We allow negative stock in Express Mode to prevent blocking sales
+    product.stock -= qty;
+    product.unitsSold = (Number(product.unitsSold) || 0) + qty;
+    product.revenue = (Number(product.revenue) || 0) + (qty * product.price);
+    product.updatedAt = new Date();
+
+    // 3. Log Sale
+    const transactionId = `tx-exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const timestamp = new Date().toISOString();
+
+    const expressSales = await kv.get(getUserKey(user.id, 'express_sales')) || [];
+    const expressSalesList = Array.isArray(expressSales) ? expressSales : [];
+    
+    expressSalesList.push({
+      id: transactionId,
+      productId,
+      quantity: qty,
+      timestamp,
+      synced: true // Since we updated stock immediately
+    });
+    
+    // Create formal Order record for Revenue Reporting
+    ordersList.push({
+      id: transactionId,
+      customerName: "Walk-in (Express)",
+      items: [{
+        productId: product.id,
+        productName: product.name,
+        quantity: qty,
+        price: product.price, // Selling price
+        unit: product.unit || 'pcs'
+      }],
+      totalAmount: qty * product.price,
+      status: 'completed',
+      paymentStatus: 'paid',
+      paymentMethod: 'cash',
+      date: timestamp,
+      createdAt: timestamp,
+      type: 'express'
+    });
+
+    // 4. Record Movement
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    
+    movementsList.push({
+        id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        transactionId: transactionId,
+        productId,
+        productName: product.name,
+        type: 'sale',
+        quantity: -qty,
+        reason: 'Express Sale',
+        date: timestamp
+    });
+
+    // 5. Save All
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    await kv.set(getUserKey(user.id, 'express_sales'), expressSalesList);
+    await kv.set(getUserKey(user.id, 'orders'), ordersList);
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+
+    return c.json({ success: true, transactionId, newStock: product.stock });
+
+  } catch (error) {
+    console.error("Express sale error:", error);
+    return c.json({ error: "Failed to record express sale" }, 500);
+  }
+});
+
+// Get Express Suggestions (AI Placeholder)
+app.get("/make-server-29b58f9a/express/suggestions", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+
+    // Simple heuristic: Top 5 products by units sold under price 500
+    const products = await kv.get(getUserKey(user.id, 'products')) || [];
+    const productsList = Array.isArray(products) ? products : [];
+
+    const suggestions = productsList
+      .filter((p: any) => p.price < 500)
+      .sort((a: any, b: any) => (b.unitsSold || 0) - (a.unitsSold || 0))
+      .slice(0, 5)
+      .map((p: any) => p.id);
+
+    return c.json({ suggestions });
+  } catch (error) {
+    console.error("Error fetching express suggestions:", error);
+    return c.json({ error: "Failed to fetch suggestions" }, 500);
   }
 });
 

@@ -1,5 +1,6 @@
 import svgPaths from "./svg-bjaxhhb966";
-import imgImageWatchFreshness from "figma:asset/bb4678c6cac92df9f360bbc019d27acc25ccdbed.png";
+const imgImageWatchFreshness = "https://images.unsplash.com/photo-1605447813584-26aeb3f8e6ae?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMHZlZ2V0YWJsZXMlMjBzdXBlcm1hcmtldCUyMHNoZWxmfGVufDF8fHx8MTc2OTkzNjI2OXww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral";
+
 
 function ImageWatchFreshness() {
   return (

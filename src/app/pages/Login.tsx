@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
-import { KeyRound, Mail, Lock, User } from 'lucide-react';
+import { KeyRound, Mail, Lock, User, Smartphone } from 'lucide-react';
 import svgPaths from "../../imports/svg-ga16o7ulxf";
 import { cn } from '../components/ui/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -75,10 +75,16 @@ function Group() {
 
 export function Login() {
   const navigate = useNavigate();
-  const { signIn, signUp, requestPasswordResetOTP, verifyOTPAndResetPassword } = useAuth();
+  const { signIn, signUp, requestPasswordResetOTP, verifyOTPAndResetPassword, signInWithPhone, verifyPhoneOtp } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  
+  // Phone Login State
+  const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
+  const [phone, setPhone] = useState('');
+  const [phoneOtp, setPhoneOtp] = useState('');
+  const [showPhoneOtpInput, setShowPhoneOtpInput] = useState(false);
   
   // Forgot Password State
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
@@ -135,6 +141,86 @@ export function Login() {
         setIsSignUp(false);
       } else {
         toast.error(errorMessage);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePhoneSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone) {
+      toast.error('Please enter your phone number');
+      return;
+    }
+    
+    // Format phone number logic for Indian context
+    let rawInput = phone.trim();
+    
+    // Remove all characters that are not digits or plus sign
+    let cleanChars = rawInput.replace(/[^0-9+]/g, '');
+    
+    // If multiple plus signs or plus not at start, strip them and handle logic
+    if (cleanChars.indexOf('+') > 0 || (cleanChars.match(/\+/g) || []).length > 1) {
+        cleanChars = cleanChars.replace(/\+/g, '');
+    }
+    
+    let formattedPhone = cleanChars;
+
+    // Handle cases without '+' prefix
+    if (!formattedPhone.startsWith('+')) {
+      // Strip leading zeros (e.g., 09876543210 -> 9876543210)
+      formattedPhone = formattedPhone.replace(/^0+/, '');
+
+      // If exactly 10 digits, assume it's an Indian number and add +91
+      if (formattedPhone.length === 10) {
+        formattedPhone = `+91${formattedPhone}`;
+      } 
+      // If 12 digits and starts with 91, assume it's Indian number with code but missing +, add +
+      else if (formattedPhone.length === 12 && formattedPhone.startsWith('91')) {
+        formattedPhone = `+${formattedPhone}`;
+      }
+      // Otherwise, the number is likely invalid for the default assumption
+      else {
+        toast.error('Invalid phone number', {
+          description: 'Please enter a valid 10-digit mobile number (e.g., 9876543210).'
+        });
+        return;
+      }
+    } else {
+        // Starts with +
+        // Basic E.164 sanity check: + followed by 7-15 digits
+        if (formattedPhone.length < 8 || formattedPhone.length > 16) {
+             toast.error('Invalid phone number length');
+             return;
+        }
+    }
+    
+    setIsLoading(true);
+    try {
+      if (showPhoneOtpInput) {
+        if (!phoneOtp) {
+          toast.error('Please enter the OTP');
+          setIsLoading(false);
+          return;
+        }
+        await verifyPhoneOtp(formattedPhone, phoneOtp);
+        navigate('/dashboard');
+      } else {
+        await signInWithPhone(formattedPhone);
+        // Store the formatted phone to ensure we use the exact same string for verification
+        setPhone(formattedPhone);
+        setShowPhoneOtpInput(true);
+        toast.success('OTP sent to your phone!');
+      }
+    } catch (error: any) {
+      console.error("Phone auth error:", error);
+      if (error.message?.includes('Invalid parameter') || error.message?.includes('60200') || error.message?.includes('Invalid phone number format')) {
+        toast.error('Invalid phone number.', {
+             description: 'Please enter a valid mobile number.'
+        });
+      } else {
+        toast.error(error.message || 'Phone login failed');
       }
     } finally {
       setIsLoading(false);
@@ -217,6 +303,31 @@ export function Login() {
           {isSignUp ? 'Create Account' : 'Welcome back'}
         </p>
         
+        {/* Login Method Toggle */}
+        {!isSignUp && (
+          <div className="flex p-1 bg-[#F5F9FC] rounded-lg w-full">
+            <button
+              onClick={() => { setLoginMethod('email'); setShowPhoneOtpInput(false); }}
+              className={cn(
+                "flex-1 py-2 text-sm font-medium rounded-md transition-all flex items-center justify-center gap-2",
+                loginMethod === 'email' ? "bg-white shadow-sm text-[#0F4C81]" : "text-[#082032]/60 hover:text-[#082032]"
+              )}
+            >
+              <Mail size={16} /> Email
+            </button>
+            <button
+              onClick={() => { setLoginMethod('phone'); setShowPhoneOtpInput(false); }}
+              className={cn(
+                "flex-1 py-2 text-sm font-medium rounded-md transition-all flex items-center justify-center gap-2",
+                loginMethod === 'phone' ? "bg-white shadow-sm text-[#0F4C81]" : "text-[#082032]/60 hover:text-[#082032]"
+              )}
+            >
+              <Smartphone size={16} /> Phone
+            </button>
+          </div>
+        )}
+        
+        {loginMethod === 'email' || isSignUp ? (
         <form onSubmit={handleSubmit} className="flex flex-col gap-[24px] w-full">
           <div className="flex flex-col gap-[8px] w-full">
             <div className="flex flex-col gap-[16px] w-full">
@@ -318,6 +429,75 @@ export function Login() {
             </button>
           </div>
         </form>
+        ) : (
+          <form onSubmit={handlePhoneSubmit} className="flex flex-col gap-[24px] w-full">
+             <div className="flex flex-col gap-[16px] w-full">
+                <div className="relative rounded-[8px] w-full">
+                  <div aria-hidden="true" className="absolute border-[0.6px] border-[rgba(0,0,0,0.5)] inset-0 pointer-events-none rounded-[8px]" />
+                  <div className="flex items-center p-[12px] gap-[6px]">
+                    <Smartphone className="size-[24px] text-[#062844]" />
+                    <input
+                      type="tel"
+                      placeholder="98765 43210"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      disabled={showPhoneOtpInput}
+                      className="w-full bg-transparent border-none outline-none text-[14px] text-[#000000] placeholder-[rgba(0,0,0,0.5)] font-sans"
+                    />
+                  </div>
+                </div>
+
+                <AnimatePresence>
+                  {showPhoneOtpInput && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="relative rounded-[8px] w-full"
+                    >
+                      <div aria-hidden="true" className="absolute border-[0.6px] border-[rgba(0,0,0,0.5)] inset-0 pointer-events-none rounded-[8px]" />
+                      <div className="flex items-center p-[12px] gap-[6px]">
+                         <KeyRound className="size-[24px] text-[#062844]" />
+                         <input
+                          type="text"
+                          placeholder="Enter OTP"
+                          value={phoneOtp}
+                          onChange={(e) => setPhoneOtp(e.target.value)}
+                          className="w-full bg-transparent border-none outline-none text-[14px] text-[#000000] placeholder-[rgba(0,0,0,0.5)] font-sans"
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+             </div>
+
+             <button
+                type="submit"
+                disabled={isLoading}
+                className="bg-[#0f4c81] h-[54px] rounded-[8px] w-full flex items-center justify-center hover:bg-[#0b355a] transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                <div className="flex items-center justify-center gap-[10px] px-[16px]">
+                  <span className="font-sans font-medium text-[16px] text-white">
+                    {isLoading ? 'Processing...' : (showPhoneOtpInput ? 'Verify & Sign In' : 'Send OTP')}
+                  </span>
+                  {!isLoading && <LsiconRightOutline />}
+                </div>
+              </button>
+              
+              <div className="flex flex-col items-center gap-[8px] w-full text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMethod('email');
+                    setIsSignUp(true);
+                  }}
+                  className="font-sans font-medium text-[16px] text-[#0b355a] underline hover:text-[#0f4c81]"
+                >
+                  Create an account
+                </button>
+              </div>
+          </form>
+        )}
       </div>
 
       {/* Forgot Password Dialogs */}

@@ -93,6 +93,7 @@ export interface PurchaseItem {
   unit: string;
   costPrice: number;
   totalCost: number;
+  expiryDate?: string;
 }
 
 export interface Purchase {

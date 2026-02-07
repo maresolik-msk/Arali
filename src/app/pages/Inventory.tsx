@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
-import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon, ScanLine, Download } from 'lucide-react';
+import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon, ScanLine, Download, Calendar, ChevronDown } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -106,7 +106,7 @@ export function Inventory() {
         setIsLoading(true);
         const products = await productsApi.getAll();
         if (isMounted) {
-          setInventoryItems(products || []);
+          setInventoryItems((products || []).filter(p => p.id));
         }
       } catch (error) {
         console.error('Error loading products:', error);
@@ -172,7 +172,7 @@ export function Inventory() {
           // Refresh products to show updated stock
           const products = await productsApi.getAll();
           if (isMounted) {
-            setInventoryItems(products || []);
+            setInventoryItems((products || []).filter(p => p.id));
           }
         }
       } catch (error) {
@@ -1048,6 +1048,7 @@ export function Inventory() {
         sellingPrice: '',
         vendorType: '',
         expiryDate: '',
+        batchNumber: '',
         alertEnabled: true,
         threshold: '10',
         imageUrl: '',
@@ -1066,20 +1067,10 @@ export function Inventory() {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-foreground">Inventory Management</h1>
+            
             <p className="text-muted-foreground">Manage your products and stock levels</p>
           </div>
           <div className="flex gap-2">
-            {/* Temporarily hidden - Scan Barcode button
-            <Button 
-              variant="outline"
-              className="border-[#0F4C81] text-[#0F4C81] hover:bg-[#0F4C81]/10 rounded-full shadow-lg"
-              onClick={() => setIsScannerOpen(true)}
-            >
-              <ScanLine className="w-4 h-4 mr-2" />
-              Scan Barcode
-            </Button>
-            */}
             <Button 
               variant="outline"
               className="border-red-500 text-red-500 hover:bg-red-50 rounded-full shadow-lg flex"
@@ -1109,18 +1100,7 @@ export function Inventory() {
 
         {/* Search and Filters */}
         <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg">
-          <div className="p-6">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#0F4C81]/40" />
-              <input
-                type="text"
-                placeholder="Search by product name or SKU..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-12 pl-12 pr-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10 focus:border-[#0F4C81]/30 focus:bg-white transition-all outline-none"
-              />
-            </div>
-          </div>
+          
         </Card>
 
         {/* Inventory Table */}
@@ -1351,13 +1331,16 @@ export function Inventory() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="expiryDate" className="text-[#0F4C81]">Expiry Date (Optional)</Label>
-              <Input 
-                id="expiryDate" 
-                type="date"
-                value={newProduct.expiryDate} 
-                onChange={(e) => setNewProduct({ ...newProduct, expiryDate: e.target.value })} 
-                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-              />
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#0F4C81]/40 pointer-events-none" />
+                <Input 
+                  id="expiryDate" 
+                  type="date"
+                  value={newProduct.expiryDate} 
+                  onChange={(e) => setNewProduct({ ...newProduct, expiryDate: e.target.value })} 
+                  className="h-11 pl-10 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1555,13 +1538,16 @@ export function Inventory() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="editExpiryDate" className="text-[#0F4C81]">Expiry Date (Optional)</Label>
-              <Input 
-                id="editExpiryDate" 
-                type="date"
-                value={editingProduct?.expiryDate || ''} 
-                onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, expiryDate: e.target.value }) : null)} 
-                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-              />
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#0F4C81]/40 pointer-events-none" />
+                <Input 
+                  id="editExpiryDate" 
+                  type="date"
+                  value={editingProduct?.expiryDate || ''} 
+                  onChange={(e) => setEditingProduct(prev => prev ? ({ ...prev, expiryDate: e.target.value }) : null)} 
+                  className="h-11 pl-10 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1729,13 +1715,16 @@ export function Inventory() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="restockExpiryDate" className="text-[#0F4C81]">Expiry Date (Optional)</Label>
-              <Input 
-                id="restockExpiryDate" 
-                type="date"
-                value={restockingProduct?.expiryDate || ''} 
-                onChange={(e) => setRestockingProduct(prev => prev ? ({ ...prev, expiryDate: e.target.value }) : null)} 
-                className="h-11 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
-              />
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#0F4C81]/40 pointer-events-none" />
+                <Input 
+                  id="restockExpiryDate" 
+                  type="date"
+                  value={restockingProduct?.expiryDate || ''} 
+                  onChange={(e) => setRestockingProduct(prev => prev ? ({ ...prev, expiryDate: e.target.value }) : null)} 
+                  className="h-11 pl-10 bg-[#0F4C81]/5 border-[#0F4C81]/20 focus:border-[#0F4C81] focus:ring-[#0F4C81]/20"
+                />
+              </div>
             </div>
           </div>
           <div className="flex gap-3 pt-2">

@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { toast } from 'sonner';
 import { usePlan } from '../../hooks/usePlan';
 import { UpgradeModal } from '../UpgradeModal';
+import { ordersApi } from '../../services/api';
 
 export function AICopilot() {
   const { limits } = usePlan();
@@ -25,22 +26,34 @@ export function AICopilot() {
 
     setIsLoading(true);
     
-    // Simulate AI delay
-    setTimeout(() => {
-      setIsLoading(false);
-      
-      // Mock responses based on query keywords
+    try {
       const q = query.toLowerCase();
-      if (q.includes('reorder')) {
+      
+      if (q.includes('total sales') || (q.includes('sales') && q.includes('how much'))) {
+        const orders = await ordersApi.getAll();
+        const totalSales = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+        setResponse(`Your total sales across all time is ₹${totalSales.toLocaleString('en-IN')}. You have processed ${orders.length} orders in total.`);
+      } else if (q.includes('reorder')) {
+        // ... (rest of the mock logic)
+        // Simulate AI delay for other mock responses
+        await new Promise(resolve => setTimeout(resolve, 1500));
         setResponse("Based on current sales velocity, you should reorder 'Organic Coffee Beans' (12 units) and 'Olive Oil' (5 units) to avoid stockouts next week.");
       } else if (q.includes('performance') || q.includes('underperforming')) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
         setResponse("'Whole Wheat Bread' sales are down 15% this week. Consider bundling it with 'Fresh Spinach' to boost movement.");
       } else if (q.includes('increase') && q.includes('sales')) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
         setResponse("You have 4 items expiring soon. Running a 'Flash Sale' on these items could recover approximately ₹1,200 in revenue today.");
       } else {
+        await new Promise(resolve => setTimeout(resolve, 1500));
         setResponse("I've analyzed your store data. Sales are trending up 12% this week! Let me know if you need specific insights on inventory or customers.");
       }
-    }, 1500);
+    } catch (error) {
+      console.error('Error fetching data for AI:', error);
+      setResponse("I'm having trouble accessing your sales data right now. Please try again later.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

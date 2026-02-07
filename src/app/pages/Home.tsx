@@ -175,7 +175,7 @@ export function Home() {
               },
               { 
                 icon: Bell, 
-                step: "02",
+                step: "02", 
                 title: "Watch Quietly", 
                 desc: "Get subtle alerts before items expire. We keep an eye on dates so you don't have to." 
               },

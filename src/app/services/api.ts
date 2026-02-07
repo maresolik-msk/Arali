@@ -38,7 +38,52 @@ export interface ShopSettings {
   shopLogoUrl?: string;
   gstIn?: string; // Added for Invoice logic
   updatedAt?: string;
+  verificationStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'UNVERIFIED';
+  verificationLevel?: 'BASIC' | 'DOCUMENT';
+  verificationMessage?: string; // Reason for rejection
 }
+
+// ========================================
+// BUSINESS VERIFICATION API
+// ========================================
+
+export const businessVerificationApi = {
+  verify: async (data: {
+    documentType: 'GST' | 'UDYAM' | 'SHOP_LICENSE' | 'TRADE_LICENSE';
+    documentNumber?: string;
+    file?: File;
+  }): Promise<{ success: boolean; status: string; message?: string }> => {
+    const accessToken = await getAccessToken();
+    const formData = new FormData();
+    formData.append('documentType', data.documentType);
+    if (data.documentNumber) formData.append('documentNumber', data.documentNumber);
+    if (data.file) formData.append('file', data.file);
+
+    const response = await fetch(`${API_BASE_URL}/business/verify`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken || publicAnonKey}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = 'Verification failed';
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.error || errorMessage;
+      } catch {}
+      throw new Error(errorMessage);
+    }
+
+    return await response.json();
+  },
+  
+  getStatus: async (): Promise<{ status: string; level: string }> => {
+    return await apiRequest('/business/verification-status');
+  }
+};
 
 const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-29b58f9a`;
 
@@ -110,104 +155,59 @@ async function getAccessToken(): Promise<string | null> {
       console.log('Using cached token (valid for', Math.round((tokenExpiry - now) / 1000 / 60), 'more minutes)');
       return cachedToken;
     }
+
+    // If we have a cached token but it's expired, explicitly try to refresh
+    if (cachedToken && isTokenExpired(cachedToken)) {
+      console.log('Cached token expired, refreshing session...');
+      const { data: { session }, error } = await supabase.auth.refreshSession();
+      if (!error && session) {
+        // Cache the refreshed token
+        cachedToken = session.access_token;
+        tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
+        localStorage.setItem('auth_token', session.access_token);
+        sessionStorage.setItem('access_token', session.access_token);
+        return session.access_token;
+      }
+    }
     
-    // Token is expired or about to expire, refresh it
-    console.log('Token expired or about to expire, refreshing session...');
-    const { data: { session }, error } = await supabase.auth.refreshSession();
+    // No cached token or refresh failed: Try to get existing session first
+    // This is crucial for initial load or after login where session exists in storage but not in memory cache
+    console.log('Getting current session...');
+    const { data: { session }, error } = await supabase.auth.getSession();
     
     if (error) {
-      console.error('Session refresh error:', error);
-      
-      // If refresh fails, try to get existing session as fallback
-      const { data: fallbackData } = await supabase.auth.getSession();
-      
-      if (fallbackData.session && fallbackData.session.access_token) {
-        // Validate the fallback token - don't use it if it's expired
-        if (isTokenExpired(fallbackData.session.access_token)) {
-          console.error('Fallback token is also expired - forcing complete sign out');
-          
-          // Force sign out to clear all Supabase state
-          await supabase.auth.signOut();
-          cachedToken = null;
-          tokenExpiry = 0;
-          localStorage.removeItem('auth_token');
-          sessionStorage.removeItem('access_token');
-          localStorage.removeItem('user');
-          
-          // Redirect to login
-          window.location.href = '/login';
-          return null;
-        }
-        
-        console.log('Using existing session as fallback (token is valid)');
-        
-        // Cache the token
-        cachedToken = fallbackData.session.access_token;
-        tokenExpiry = fallbackData.session.expires_at ? fallbackData.session.expires_at * 1000 : 0;
-        
-        localStorage.setItem('auth_token', fallbackData.session.access_token);
-        sessionStorage.setItem('access_token', fallbackData.session.access_token);
-        return fallbackData.session.access_token;
-      }
-      
-      // No valid session available - force sign out
-      console.error('No valid session available - forcing sign out');
-      await supabase.auth.signOut();
-      cachedToken = null;
-      tokenExpiry = 0;
-      localStorage.removeItem('auth_token');
-      sessionStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      
-      // Redirect to login
-      window.location.href = '/login';
-      return null;
+       console.error('Get session error:', error);
+       // Only if getSession fails do we consider forcing a refresh or signout
+       if (error.message?.includes('missing') || error.message?.includes('not found')) {
+         // Session genuinely missing
+         cachedToken = null;
+         return null;
+       }
     }
     
-    if (!session) {
-      console.warn('No active session after refresh - forcing sign out');
-      await supabase.auth.signOut();
-      cachedToken = null;
-      tokenExpiry = 0;
-      localStorage.removeItem('auth_token');
-      sessionStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      
-      // Redirect to login
-      window.location.href = '/login';
-      return null;
+    if (session && session.access_token) {
+       // Check if this retrieved session is expired
+       if (isTokenExpired(session.access_token)) {
+          console.log('Retrieved session token is expired, refreshing...');
+          const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession();
+          if (!refreshError && refreshedSession) {
+             cachedToken = refreshedSession.access_token;
+             tokenExpiry = refreshedSession.expires_at ? refreshedSession.expires_at * 1000 : 0;
+             localStorage.setItem('auth_token', refreshedSession.access_token);
+             sessionStorage.setItem('access_token', refreshedSession.access_token);
+             return refreshedSession.access_token;
+          }
+       } else {
+          // Session is valid
+          cachedToken = session.access_token;
+          tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
+          return session.access_token;
+       }
     }
     
-    // Validate the refreshed token before caching it
-    if (isTokenExpired(session.access_token)) {
-      console.error('Refreshed token is STILL expired - refresh token must be invalid!');
-      console.error('This should not happen - forcing complete sign out');
-      
-      // Force sign out to clear all Supabase state
-      await supabase.auth.signOut();
-      cachedToken = null;
-      tokenExpiry = 0;
-      localStorage.removeItem('auth_token');
-      sessionStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      
-      // Redirect to login
-      window.location.href = '/login';
-      return null;
-    }
-    
-    // Cache the token and its expiry
-    cachedToken = session.access_token;
-    tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
-    
-    // Update local storage with fresh token
-    localStorage.setItem('auth_token', session.access_token);
-    sessionStorage.setItem('access_token', session.access_token);
-    
-    console.log('Fresh token obtained, expires at:', new Date(tokenExpiry).toLocaleString());
-    
-    // Return the fresh access token
-    return session.access_token;
+    // If we get here, we really don't have a valid session
+    return null;
+
   } catch (error) {
     console.error('Error retrieving access token:', error);
     cachedToken = null;
@@ -296,6 +296,13 @@ async function apiRequest<T>(
       const data = await response.json();
       return data as T;
     } catch (error: any) {
+      // Retry on network error (TypeError: Failed to fetch)
+      if (retryCount < 3 && (error.name === 'TypeError' || error.message === 'Failed to fetch')) {
+        console.log(`Network error (${endpoint}), retrying (${retryCount + 1}/3)...`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))); // Exponential backoff
+        return apiRequest<T>(endpoint, options, retryCount + 1);
+      }
+
       // Handle timeout errors gracefully
       if (error.name === 'AbortError' || error.message?.includes('aborted')) {
         console.warn(`API Request timeout (${endpoint})`);
@@ -771,6 +778,40 @@ export const notificationsApi = {
       method: 'POST',
     });
   },
+};
+
+// ========================================
+// EXPRESS MODE API
+// ========================================
+
+export const expressApi = {
+  // Get express config
+  getConfig: async (): Promise<{ pinnedItemIds: number[] }> => {
+    const data = await apiRequest<{ config: { pinnedItemIds: number[] } }>('/express/config');
+    return data.config;
+  },
+
+  // Update express config
+  updateConfig: async (pinnedItemIds: number[]): Promise<void> => {
+    await apiRequest('/express/config', {
+      method: 'POST',
+      body: JSON.stringify({ pinnedItemIds }),
+    });
+  },
+
+  // Record express sale
+  recordSale: async (productId: number, quantity: number = 1): Promise<{ success: boolean; transactionId: string; newStock: number }> => {
+    return await apiRequest<{ success: boolean; transactionId: string; newStock: number }>('/express/sale', {
+      method: 'POST',
+      body: JSON.stringify({ productId, quantity }),
+    });
+  },
+
+  // Get AI suggestions
+  getSuggestions: async (): Promise<number[]> => {
+    const data = await apiRequest<{ suggestions: number[] }>('/express/suggestions');
+    return data.suggestions;
+  }
 };
 
 // ========================================

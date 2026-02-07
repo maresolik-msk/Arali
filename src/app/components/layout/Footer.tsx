@@ -164,12 +164,12 @@ export function Footer() {
             <button onClick={() => handleSocialClick('twitter')} className="text-[#082032]/40 hover:text-[#0F4C81] transition-colors">
               <XIcon size={20} />
             </button>
-            <button onClick={() => handleSocialClick('linkedin')} className="text-[#082032]/40 hover:text-[#0F4C81] transition-colors">
+            <a href="https://linkedin.com/company/arali-msk" target="_blank" rel="noopener noreferrer" className="text-[#082032]/40 hover:text-[#0F4C81] transition-colors">
               <Linkedin size={20} />
-            </button>
-            <button onClick={() => handleSocialClick('instagram')} className="text-[#082032]/40 hover:text-[#0F4C81] transition-colors">
+            </a>
+            <a href="https://www.instagram.com/arali.msk?igsh=MXJ2aTg3enk0N2N1ZQ==" target="_blank" rel="noopener noreferrer" className="text-[#082032]/40 hover:text-[#0F4C81] transition-colors">
               <Instagram size={20} />
-            </button>
+            </a>
             <button onClick={() => handleSocialClick('facebook')} className="text-[#082032]/40 hover:text-[#0F4C81] transition-colors">
               <Facebook size={20} />
             </button>

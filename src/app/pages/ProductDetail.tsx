@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { motion } from 'motion/react';
-import { ArrowLeft, Package, TrendingUp, AlertCircle, Calendar, DollarSign, Edit2, Trash2, ShoppingCart, PackagePlus } from 'lucide-react';
+import { ArrowLeft, Package, TrendingUp, AlertCircle, Calendar, DollarSign, Edit2, Trash2, ShoppingCart, PackagePlus, ChevronDown, Sparkles, Loader2, Image as ImageIcon } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { productsApi } from '../services/api';
 import type { Product } from '../data/dashboardData';
 import { AIProductHelper } from '../components/ai/AIProductHelper';
+import { generateProductImage } from '../services/ai';
 
 export function ProductDetail() {
   const { productId } = useParams<{ productId: string }>();
@@ -24,6 +25,10 @@ export function ProductDetail() {
   const [isRestockDialogOpen, setIsRestockDialogOpen] = useState(false);
   const [isRecordSalesDialogOpen, setIsRecordSalesDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isAdjustStockDialogOpen, setIsAdjustStockDialogOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [movements, setMovements] = useState<any[]>([]);
   
   const [editingProduct, setEditingProduct] = useState<{
     id: number;
@@ -41,14 +46,6 @@ export function ProductDetail() {
     imageUrl: string;
   } | null>(null);
 
-  const [restockQuantity, setRestockQuantity] = useState('');
-  const [salesQuantity, setSalesQuantity] = useState('');
-
-  const [movements, setMovements] = useState<any[]>([]);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isAdjustStockDialogOpen, setIsAdjustStockDialogOpen] = useState(false);
-  
-  // Restock Form State
   const [restockForm, setRestockForm] = useState({
     quantity: '',
     costPrice: '',
@@ -56,7 +53,8 @@ export function ProductDetail() {
     expiryDate: ''
   });
 
-  // Adjust Stock Form State
+  const [salesQuantity, setSalesQuantity] = useState('');
+
   const [adjustForm, setAdjustForm] = useState({
     quantity: '',
     type: 'damaged', // expired, damaged, missing, correction
@@ -121,6 +119,34 @@ export function ProductDetail() {
       imageUrl: product.imageUrl || '',
     });
     setIsEditDialogOpen(true);
+  };
+
+  const handleGenerateImage = async (isEditing: boolean) => {
+    const targetProduct = isEditing ? editingProduct : product;
+    if (!targetProduct?.name) {
+      toast.error('Please enter a product name first');
+      return;
+    }
+
+    try {
+      setIsGeneratingImage(true);
+      const result = await generateProductImage(targetProduct.name, undefined, targetProduct.category);
+      
+      if (isEditing && editingProduct) {
+        setEditingProduct({ ...editingProduct, imageUrl: result.imageUrl });
+      }
+      
+      if (result.isFallback) {
+        toast.warning('Using placeholder image due to AI service limits.');
+      } else {
+        toast.success('Product image generated successfully!');
+      }
+    } catch (error) {
+      console.error('Error generating image:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to generate image');
+    } finally {
+      setIsGeneratingImage(false);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -236,18 +262,18 @@ export function ProductDetail() {
   };
 
   const getStockStatus = (stock: number, threshold: number) => {
-    if (stock === 0) return { label: 'Out of Stock', color: 'bg-red-500/20 text-red-300' };
-    if (stock <= threshold) return { label: 'Low Stock', color: 'bg-yellow-500/20 text-yellow-300' };
-    return { label: 'In Stock', color: 'bg-green-500/20 text-green-300' };
+    if (stock === 0) return { label: 'Out of Stock', color: 'bg-red-100 text-red-700' };
+    if (stock <= threshold) return { label: 'Low Stock', color: 'bg-yellow-100 text-yellow-700' };
+    return { label: 'In Stock', color: 'bg-green-100 text-green-700' };
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#0A1828] via-[#0F4C81] to-[#1B365D] p-6 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50/50 p-6 flex items-center justify-center">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="text-white"
+          className="text-gray-500"
         >
           Loading...
         </motion.div>
@@ -262,14 +288,14 @@ export function ProductDetail() {
   const stockStatus = getStockStatus(product.stock, product.threshold);
   const profitMargin = ((product.sellingPrice - product.costPrice) / product.sellingPrice * 100).toFixed(1);
   const marginValue = parseFloat(profitMargin);
-  let marginColor = 'text-white';
+  let marginColor = 'text-gray-900';
   let marginLabel = '';
-  if (marginValue >= 40) { marginColor = 'text-green-400'; marginLabel = '(High)'; }
-  else if (marginValue >= 20) { marginColor = 'text-yellow-400'; marginLabel = '(Medium)'; }
-  else { marginColor = 'text-red-400'; marginLabel = '(Low)'; }
+  if (marginValue >= 40) { marginColor = 'text-green-600'; marginLabel = '(High)'; }
+  else if (marginValue >= 20) { marginColor = 'text-yellow-600'; marginLabel = '(Medium)'; }
+  else { marginColor = 'text-red-600'; marginLabel = '(Low)'; }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0A1828] via-[#0F4C81] to-[#1B365D] p-4 md:p-8">
+    <div className="min-h-screen bg-gray-50/50 p-4 md:p-8 pb-24">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <motion.div
@@ -280,7 +306,7 @@ export function ProductDetail() {
           <Button
             onClick={() => navigate('/dashboard/inventory')}
             variant="ghost"
-            className="text-white mb-4 -ml-4"
+            className="text-gray-600 hover:text-gray-900 mb-4 -ml-4"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Inventory
@@ -288,18 +314,18 @@ export function ProductDetail() {
           
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-white mb-2">{product.name}</h1>
-              <p className="text-white/60">SKU: {product.sku}</p>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">{product.name}</h1>
+              <p className="text-gray-500">SKU: {product.sku}</p>
             </div>
             <div className="flex gap-2">
-              <Button onClick={handleEdit} variant="outline" className="text-white border-white/20 bg-[rgb(3,18,30)]">
+              <Button onClick={handleEdit} variant="outline" className="bg-white">
                 <Edit2 className="w-4 h-4 mr-2" />
                 Edit
               </Button>
               <Button 
                 onClick={() => setIsDeleteDialogOpen(true)}
                 variant="outline" 
-                className="text-red-300 border-red-500/20 hover:bg-red-500/10"
+                className="text-red-600 hover:bg-red-50 border-red-200"
               >
                 <Trash2 className="w-4 h-4 mr-2" />
                 Delete
@@ -316,9 +342,9 @@ export function ProductDetail() {
             animate={{ opacity: 1, x: 0 }}
             className="lg:col-span-1"
           >
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
               {/* Product Image */}
-              <div className="aspect-square rounded-lg overflow-hidden bg-white/5 mb-6">
+              <div className="aspect-square rounded-lg overflow-hidden bg-gray-100 mb-6">
                 {product.imageUrl ? (
                   <ImageWithFallback
                     src={product.imageUrl}
@@ -327,7 +353,7 @@ export function ProductDetail() {
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
-                    <Package className="w-24 h-24 text-white/20" />
+                    <Package className="w-24 h-24 text-gray-300" />
                   </div>
                 )}
               </div>
@@ -336,22 +362,23 @@ export function ProductDetail() {
               <div className="space-y-3">
                 <Button
                   onClick={() => setIsRestockDialogOpen(true)}
-                  className="w-full bg-green-600 hover:bg-green-700"
+                  className="w-full bg-[#0F4C81] hover:bg-[#0d3f6a]"
                 >
                   <PackagePlus className="w-4 h-4 mr-2" />
                   Restock
                 </Button>
                 <Button
                   onClick={() => setIsRecordSalesDialogOpen(true)}
-                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  className="w-full"
+                  variant="outline"
                 >
                   <ShoppingCart className="w-4 h-4 mr-2" />
                   Record Sale
                 </Button>
                 <Button
                   onClick={() => setIsAdjustStockDialogOpen(true)}
-                  variant="outline"
-                  className="w-full text-white border-white/20 hover:bg-white/10"
+                  variant="ghost"
+                  className="w-full text-gray-600"
                 >
                   <AlertCircle className="w-4 h-4 mr-2" />
                   Adjust Stock
@@ -367,66 +394,66 @@ export function ProductDetail() {
             className="lg:col-span-2 space-y-6"
           >
             {/* Overview Card */}
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
-              <h2 className="text-white mb-4">Product Overview</h2>
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Product Overview</h2>
               
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <div>
-                  <p className="text-white/60 text-sm mb-1">Category</p>
-                  <Badge className="bg-white/10 text-white">{product.category}</Badge>
+                  <p className="text-gray-500 text-sm mb-1">Category</p>
+                  <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-200 border-0">{product.category}</Badge>
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm mb-1">Status</p>
+                  <p className="text-gray-500 text-sm mb-1">Status</p>
                   <Badge className={stockStatus.color}>{stockStatus.label}</Badge>
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm mb-1">Current Stock</p>
-                  <p className="text-white">{product.stock} units</p>
+                  <p className="text-gray-500 text-sm mb-1">Current Stock</p>
+                  <p className="text-gray-900 font-medium">{product.stock} units</p>
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm mb-1">Threshold</p>
-                  <p className="text-white">{product.threshold} units</p>
+                  <p className="text-gray-500 text-sm mb-1">Threshold</p>
+                  <p className="text-gray-900 font-medium">{product.threshold} units</p>
                 </div>
               </div>
 
               {product.description && (
                 <div className="mb-6">
-                  <p className="text-white/60 text-sm mb-2">Description</p>
-                  <p className="text-white">{product.description}</p>
+                  <p className="text-gray-500 text-sm mb-2">Description</p>
+                  <p className="text-gray-900">{product.description}</p>
                 </div>
               )}
 
               {product.vendorType && (
                 <div>
-                  <p className="text-white/60 text-sm mb-1">Vendor</p>
-                  <p className="text-white">{product.vendorType}</p>
+                  <p className="text-gray-500 text-sm mb-1">Vendor</p>
+                  <p className="text-gray-900">{product.vendorType}</p>
                 </div>
               )}
             </Card>
 
             {/* Pricing Card */}
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
-              <h2 className="text-white mb-4">Pricing & Revenue</h2>
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Pricing & Revenue</h2>
               
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <DollarSign className="w-4 h-4 text-green-400" />
-                    <p className="text-white/60 text-sm">Selling Price</p>
+                    <DollarSign className="w-4 h-4 text-gray-400" />
+                    <p className="text-gray-500 text-sm">Selling Price</p>
                   </div>
-                  <p className="text-white">₹{product.sellingPrice}</p>
+                  <p className="text-gray-900 font-medium">₹{product.sellingPrice}</p>
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <DollarSign className="w-4 h-4 text-orange-400" />
-                    <p className="text-white/60 text-sm">Cost Price</p>
+                    <DollarSign className="w-4 h-4 text-gray-400" />
+                    <p className="text-gray-500 text-sm">Cost Price</p>
                   </div>
-                  <p className="text-white">₹{product.costPrice}</p>
+                  <p className="text-gray-900 font-medium">₹{product.costPrice}</p>
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <TrendingUp className="w-4 h-4 text-blue-400" />
-                    <p className="text-white/60 text-sm">Profit Margin</p>
+                    <TrendingUp className="w-4 h-4 text-gray-400" />
+                    <p className="text-gray-500 text-sm">Profit Margin</p>
                   </div>
                   <div className="flex items-baseline gap-2">
                     <p className={`text-xl font-bold ${marginColor}`}>{profitMargin}%</p>
@@ -435,66 +462,66 @@ export function ProductDetail() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <TrendingUp className="w-4 h-4 text-purple-400" />
-                    <p className="text-white/60 text-sm">Total Revenue</p>
+                    <TrendingUp className="w-4 h-4 text-gray-400" />
+                    <p className="text-gray-500 text-sm">Total Revenue</p>
                   </div>
-                  <p className="text-white">₹{product.revenue.toLocaleString('en-IN')}</p>
+                  <p className="text-gray-900 font-medium">₹{product.revenue.toLocaleString('en-IN')}</p>
                 </div>
               </div>
             </Card>
 
             {/* Sales Performance Card */}
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
-              <h2 className="text-white mb-4">Sales Performance</h2>
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Sales Performance</h2>
               
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <p className="text-white/60 text-sm mb-1">Units Sold</p>
-                  <p className="text-white">{product.unitsSold} units</p>
+                  <p className="text-gray-500 text-sm mb-1">Units Sold</p>
+                  <p className="text-gray-900 font-medium">{product.unitsSold} units</p>
                 </div>
                 <div>
-                  <p className="text-white/60 text-sm mb-1">Average Price</p>
-                  <p className="text-white">₹{product.unitsSold > 0 ? (product.revenue / product.unitsSold).toFixed(2) : '0.00'}</p>
+                  <p className="text-gray-500 text-sm mb-1">Average Price</p>
+                  <p className="text-gray-900 font-medium">₹{product.unitsSold > 0 ? (product.revenue / product.unitsSold).toFixed(2) : '0.00'}</p>
                 </div>
               </div>
             </Card>
 
             {/* Additional Info Card */}
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
-              <h2 className="text-white mb-4">Additional Information</h2>
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Additional Information</h2>
               
               <div className="space-y-4">
                 {product.expiryDate && (
                   <div className="flex items-center gap-3">
-                    <Calendar className="w-5 h-5 text-white/60" />
+                    <Calendar className="w-5 h-5 text-gray-400" />
                     <div>
-                      <p className="text-white/60 text-sm">Expiry Date</p>
-                      <p className="text-white">{new Date(product.expiryDate).toLocaleDateString()}</p>
+                      <p className="text-gray-500 text-sm">Expiry Date</p>
+                      <p className="text-gray-900">{new Date(product.expiryDate).toLocaleDateString()}</p>
                     </div>
                   </div>
                 )}
                 <div className="flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-white/60" />
+                  <AlertCircle className="w-5 h-5 text-gray-400" />
                   <div>
-                    <p className="text-white/60 text-sm">Low Stock Alerts</p>
-                    <p className="text-white">{product.alertEnabled ? 'Enabled' : 'Disabled'}</p>
+                    <p className="text-gray-500 text-sm">Low Stock Alerts</p>
+                    <p className="text-gray-900">{product.alertEnabled ? 'Enabled' : 'Disabled'}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Calendar className="w-5 h-5 text-white/60" />
+                  <Calendar className="w-5 h-5 text-gray-400" />
                   <div>
-                    <p className="text-white/60 text-sm">Last Updated</p>
-                    <p className="text-white">{new Date(product.updatedAt).toLocaleDateString()}</p>
+                    <p className="text-gray-500 text-sm">Last Updated</p>
+                    <p className="text-gray-900">{new Date(product.updatedAt).toLocaleDateString()}</p>
                   </div>
                 </div>
               </div>
             </Card>
             
             {/* Batches & Expiry Intelligence */}
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
-              <h2 className="text-white mb-4">Stock Batches & Expiry</h2>
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Stock Batches & Expiry</h2>
               {!product.batches || product.batches.length === 0 ? (
-                <p className="text-white/60">No batch information available.</p>
+                <p className="text-gray-500">No batch information available.</p>
               ) : (
                 <div className="space-y-4">
                   {product.batches.map((batch: any) => {
@@ -503,28 +530,28 @@ export function ProductDetail() {
                      const timeDiff = expiryDate.getTime() - now.getTime();
                      const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
                      
-                     let statusColor = 'text-green-400';
+                     let statusColor = 'text-green-600';
                      let suggestion = '';
-                     if (daysLeft < 0) { statusColor = 'text-red-500'; suggestion = 'Mark as Wastage'; }
-                     else if (daysLeft < 7) { statusColor = 'text-red-400'; suggestion = 'Apply Discount'; }
-                     else if (daysLeft < 30) { statusColor = 'text-yellow-400'; suggestion = 'Monitor'; }
+                     if (daysLeft < 0) { statusColor = 'text-red-600'; suggestion = 'Mark as Wastage'; }
+                     else if (daysLeft < 7) { statusColor = 'text-red-500'; suggestion = 'Apply Discount'; }
+                     else if (daysLeft < 30) { statusColor = 'text-yellow-600'; suggestion = 'Monitor'; }
 
                      return (
-                       <div key={batch.id} className="bg-white/5 rounded-lg p-4 border border-white/10">
+                       <div key={batch.id} className="bg-gray-50 rounded-lg p-4 border border-gray-100">
                          <div className="flex justify-between items-start mb-2">
                            <div>
-                             <p className="text-white font-medium">{batch.batchNumber}</p>
-                             <p className="text-white/60 text-xs">Rec: {new Date(batch.receivedDate).toLocaleDateString()}</p>
+                             <p className="text-gray-900 font-medium">{batch.batchNumber}</p>
+                             <p className="text-gray-500 text-xs">Rec: {new Date(batch.receivedDate).toLocaleDateString()}</p>
                            </div>
                            <div className="text-right">
-                             <p className="text-white font-bold">{batch.quantity} units</p>
-                             <Badge className={`mt-1 ${daysLeft < 7 ? 'bg-red-500/20 text-red-300' : 'bg-green-500/20 text-green-300'}`}>
+                             <p className="text-gray-900 font-bold">{batch.quantity} units</p>
+                             <Badge className={`mt-1 ${daysLeft < 7 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                                 {daysLeft < 0 ? 'Expired' : `${daysLeft} days left`}
                              </Badge>
                            </div>
                          </div>
                          {suggestion && (
-                           <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10">
+                           <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
                               <p className={`text-xs ${statusColor} flex items-center gap-1`}>
                                 <AlertCircle size={12} /> Suggestion: {suggestion}
                               </p>
@@ -538,10 +565,10 @@ export function ProductDetail() {
             </Card>
 
             {/* Inventory History */}
-            <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
                <div className="flex items-center justify-between mb-4 cursor-pointer" onClick={() => setIsHistoryOpen(!isHistoryOpen)}>
-                 <h2 className="text-white">Inventory History</h2>
-                 <Button variant="ghost" size="sm" className="text-white/60 hover:text-white hover:bg-white/10">
+                 <h2 className="text-lg font-semibold text-gray-900">Inventory History</h2>
+                 <Button variant="ghost" size="sm" className="text-gray-500 hover:text-gray-900">
                     {isHistoryOpen ? 'Hide' : 'Show'}
                  </Button>
                </div>
@@ -549,26 +576,26 @@ export function ProductDetail() {
                {isHistoryOpen && (
                  <div className="space-y-3">
                     {movements.length === 0 ? (
-                        <p className="text-white/60">No history available.</p>
+                        <p className="text-gray-500">No history available.</p>
                     ) : (
                         movements.map((mov) => (
-                           <div key={mov.id} className="flex justify-between items-center py-2 border-b border-white/10 last:border-0">
+                           <div key={mov.id} className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
                               <div>
                                  <div className="flex items-center gap-2">
                                     <span className={`text-xs px-2 py-0.5 rounded uppercase font-bold ${
-                                        mov.type === 'sale' ? 'bg-blue-500/20 text-blue-300' :
-                                        mov.type === 'restock' ? 'bg-green-500/20 text-green-300' :
-                                        'bg-red-500/20 text-red-300'
+                                        mov.type === 'sale' ? 'bg-blue-100 text-blue-700' :
+                                        mov.type === 'restock' ? 'bg-green-100 text-green-700' :
+                                        'bg-red-100 text-red-700'
                                     }`}>
                                         {mov.type}
                                     </span>
-                                    <span className="text-white/80 text-sm">{mov.reason}</span>
+                                    <span className="text-gray-700 text-sm">{mov.reason}</span>
                                  </div>
-                                 <p className="text-white/40 text-xs mt-1">{new Date(mov.date).toLocaleString()}</p>
+                                 <p className="text-gray-500 text-xs mt-1">{new Date(mov.date).toLocaleString()}</p>
                               </div>
-                              <div className={`font-mono font-bold ${mov.quantity > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                               <div className={`font-mono font-bold ${mov.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
                                  {mov.quantity > 0 ? '+' : ''}{mov.quantity}
-                              </div>
+                               </div>
                            </div>
                         ))
                     )}
@@ -581,10 +608,10 @@ export function ProductDetail() {
 
       {/* Edit Product Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="edit-product-description">
+        <DialogContent className="sm:max-w-[600px] bg-white text-gray-900" aria-describedby="edit-product-description">
           <DialogHeader>
-            <DialogTitle className="text-white">Edit Product</DialogTitle>
-            <DialogDescription id="edit-product-description" className="text-white/60">
+            <DialogTitle>Edit Product</DialogTitle>
+            <DialogDescription id="edit-product-description" className="text-gray-500">
               Make changes to the product details below.
             </DialogDescription>
           </DialogHeader>
@@ -592,42 +619,38 @@ export function ProductDetail() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="edit-name" className="text-white">Product Name</Label>
+                  <Label htmlFor="edit-name">Product Name</Label>
                   <Input
                     id="edit-name"
                     value={editingProduct.name}
                     onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="edit-sku" className="text-white">SKU</Label>
+                  <Label htmlFor="edit-sku">SKU</Label>
                   <Input
                     id="edit-sku"
                     value={editingProduct.sku}
                     onChange={(e) => setEditingProduct({ ...editingProduct, sku: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="edit-description" className="text-white">Description</Label>
+                <Label htmlFor="edit-description">Description</Label>
                 <Input
                   id="edit-description"
                   value={editingProduct.description}
                   onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
-                  className="bg-white/10 border-white/20 text-white"
                 />
               </div>
 
               <div>
-                <Label htmlFor="edit-imageUrl" className="text-white">Image URL</Label>
+                <Label htmlFor="edit-imageUrl">Image URL</Label>
                 <Input
                   id="edit-imageUrl"
                   value={editingProduct.imageUrl}
                   onChange={(e) => setEditingProduct({ ...editingProduct, imageUrl: e.target.value })}
-                  className="bg-white/10 border-white/20 text-white"
                   placeholder="https://example.com/image.jpg"
                 />
               </div>
@@ -648,78 +671,75 @@ export function ProductDetail() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="edit-category" className="text-white">Category</Label>
+                  <Label htmlFor="edit-category">Category</Label>
                   <Input
                     id="edit-category"
                     value={editingProduct.category}
                     onChange={(e) => setEditingProduct({ ...editingProduct, category: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="edit-vendor" className="text-white">Vendor</Label>
+                  <Label htmlFor="edit-vendor">Vendor</Label>
                   <Input
                     id="edit-vendor"
                     value={editingProduct.vendorType}
                     onChange={(e) => setEditingProduct({ ...editingProduct, vendorType: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <Label htmlFor="edit-stock" className="text-white">Stock</Label>
+                  <Label htmlFor="edit-stock">Stock</Label>
                   <Input
                     id="edit-stock"
                     type="number"
                     value={editingProduct.stock}
                     onChange={(e) => setEditingProduct({ ...editingProduct, stock: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="edit-cost" className="text-white">Cost Price (₹)</Label>
+                  <Label htmlFor="edit-cost">Cost Price (₹)</Label>
                   <Input
                     id="edit-cost"
                     type="number"
                     value={editingProduct.costPrice}
                     onChange={(e) => setEditingProduct({ ...editingProduct, costPrice: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="edit-selling" className="text-white">Selling Price (₹)</Label>
+                  <Label htmlFor="edit-selling">Selling Price (₹)</Label>
                   <Input
                     id="edit-selling"
                     type="number"
                     value={editingProduct.sellingPrice}
                     onChange={(e) => setEditingProduct({ ...editingProduct, sellingPrice: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="edit-threshold" className="text-white">Alert Threshold</Label>
+                  <Label htmlFor="edit-threshold">Alert Threshold</Label>
                   <Input
                     id="edit-threshold"
                     type="number"
                     value={editingProduct.threshold}
                     onChange={(e) => setEditingProduct({ ...editingProduct, threshold: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
                   />
                 </div>
                 <div className="px-[0px] py-[2px] mx-[0px] my-[2px]">
-                  <Label htmlFor="edit-expiry" className="text-white">Expiry Date</Label>
-                  <Input
-                    id="edit-expiry"
-                    type="date"
-                    value={editingProduct.expiryDate}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, expiryDate: e.target.value })}
-                    className="bg-white/10 border-white/20 text-white"
-                  />
+                  <Label htmlFor="edit-expiry">Expiry Date</Label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+                    <Input
+                      id="edit-expiry"
+                      type="date"
+                      value={editingProduct.expiryDate}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, expiryDate: e.target.value })}
+                      className="pl-10"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -729,11 +749,11 @@ export function ProductDetail() {
                   checked={editingProduct.alertEnabled}
                   onCheckedChange={(checked) => setEditingProduct({ ...editingProduct, alertEnabled: checked })}
                 />
-                <Label htmlFor="edit-alert" className="text-white">Enable Low Stock Alerts</Label>
+                <Label htmlFor="edit-alert">Enable Low Stock Alerts</Label>
               </div>
 
               <div className="flex gap-2 pt-4">
-                <Button onClick={handleSaveEdit} className="flex-1 bg-green-600 hover:bg-green-700">
+                <Button onClick={handleSaveEdit} className="flex-1 bg-[#0F4C81] hover:bg-[#0d3f6a]">
                   Save Changes
                 </Button>
                 <Button onClick={() => setIsEditDialogOpen(false)} variant="outline" className="flex-1">
@@ -747,55 +767,56 @@ export function ProductDetail() {
 
       {/* Restock Dialog */}
       <Dialog open={isRestockDialogOpen} onOpenChange={setIsRestockDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="restock-product-description">
+        <DialogContent className="bg-white text-gray-900" aria-describedby="restock-product-description">
           <DialogHeader>
-            <DialogTitle className="text-white">Restock Product</DialogTitle>
-            <DialogDescription id="restock-product-description" className="text-white/60">
+            <DialogTitle>Restock Product</DialogTitle>
+            <DialogDescription id="restock-product-description" className="text-gray-500">
               Add inventory to the current stock count.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-white/80">Current Stock: {product.stock} units</p>
+            <p className="text-gray-700">Current Stock: {product.stock} units</p>
             <div>
-              <Label htmlFor="restock-quantity" className="text-white">Quantity to Add</Label>
+              <Label htmlFor="restock-quantity">Quantity to Add</Label>
               <Input
                 id="restock-quantity"
                 type="number"
                 value={restockForm.quantity}
                 onChange={(e) => setRestockForm({...restockForm, quantity: e.target.value})}
-                className="bg-white/10 border-white/20 text-white"
                 placeholder="Enter quantity"
               />
             </div>
             
             <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="restock-batch" className="text-white">Batch Number</Label>
+                  <Label htmlFor="restock-batch">Batch Number</Label>
                   <Input
                     id="restock-batch"
                     value={restockForm.batchNumber}
                     onChange={(e) => setRestockForm({...restockForm, batchNumber: e.target.value})}
-                    className="bg-white/10 border-white/20 text-white"
                     placeholder="Optional"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="restock-expiry" className="text-white">Expiry Date</Label>
-                  <Input
-                    id="restock-expiry"
-                    type="date"
-                    value={restockForm.expiryDate}
-                    onChange={(e) => setRestockForm({...restockForm, expiryDate: e.target.value})}
-                    className="bg-white/10 border-white/20 text-white"
-                  />
+                  <Label htmlFor="restock-expiry">Expiry Date</Label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+                    <Input
+                      id="restock-expiry"
+                      type="date"
+                      value={restockForm.expiryDate}
+                      onChange={(e) => setRestockForm({...restockForm, expiryDate: e.target.value})}
+                      className="pl-10"
+                    />
+                  </div>
                 </div>
             </div>
 
-            <p className="text-white/60 text-sm">
+            <p className="text-gray-500 text-sm">
               New Stock: {product.stock + (parseInt(restockForm.quantity) || 0)} units
             </p>
             <div className="flex gap-2 pt-4">
-              <Button onClick={handleRestock} className="flex-1 bg-green-600 hover:bg-green-700">
+              <Button onClick={handleRestock} className="flex-1 bg-[#0F4C81] hover:bg-[#0d3f6a]">
                 Confirm Restock
               </Button>
               <Button onClick={() => setIsRestockDialogOpen(false)} variant="outline" className="flex-1">
@@ -808,50 +829,51 @@ export function ProductDetail() {
 
       {/* Adjust Stock Dialog */}
       <Dialog open={isAdjustStockDialogOpen} onOpenChange={setIsAdjustStockDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="adjust-stock-description">
+        <DialogContent className="bg-white text-gray-900" aria-describedby="adjust-stock-description">
           <DialogHeader>
-            <DialogTitle className="text-white">Adjust Stock (Reduction)</DialogTitle>
-            <DialogDescription id="adjust-stock-description" className="text-white/60">
+            <DialogTitle>Adjust Stock (Reduction)</DialogTitle>
+            <DialogDescription id="adjust-stock-description" className="text-gray-500">
               Record wastage, damage, or inventory corrections.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-white/80">Current Stock: {product.stock} units</p>
+            <p className="text-gray-700">Current Stock: {product.stock} units</p>
             
             <div>
-              <Label htmlFor="adjust-quantity" className="text-white">Quantity to Remove</Label>
+              <Label htmlFor="adjust-quantity">Quantity to Remove</Label>
               <Input
                 id="adjust-quantity"
                 type="number"
                 value={adjustForm.quantity}
                 onChange={(e) => setAdjustForm({...adjustForm, quantity: e.target.value})}
-                className="bg-white/10 border-white/20 text-white"
                 placeholder="Enter quantity"
               />
             </div>
 
             <div>
-              <Label htmlFor="adjust-type" className="text-white">Reason</Label>
-              <select 
-                id="adjust-type"
-                value={adjustForm.type}
-                onChange={(e) => setAdjustForm({...adjustForm, type: e.target.value})}
-                className="w-full bg-white/10 border border-white/20 text-white rounded-md p-2"
-              >
-                  <option value="expired">Expired</option>
-                  <option value="damaged">Damaged</option>
-                  <option value="missing">Missing / Theft</option>
-                  <option value="correction">Inventory Correction</option>
-              </select>
+              <Label htmlFor="adjust-type">Reason</Label>
+              <div className="relative">
+                <select 
+                  id="adjust-type"
+                  value={adjustForm.type}
+                  onChange={(e) => setAdjustForm({...adjustForm, type: e.target.value})}
+                  className="w-full bg-white border border-gray-200 text-gray-900 rounded-md py-2 pl-3 pr-10 appearance-none focus:outline-none focus:ring-2 focus:ring-[#0F4C81] focus:border-transparent"
+                >
+                    <option value="expired">Expired</option>
+                    <option value="damaged">Damaged</option>
+                    <option value="missing">Missing / Theft</option>
+                    <option value="correction">Inventory Correction</option>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 pointer-events-none" />
+              </div>
             </div>
             
             <div>
-               <Label htmlFor="adjust-notes" className="text-white">Notes (Optional)</Label>
+               <Label htmlFor="adjust-notes">Notes (Optional)</Label>
                <Input
                   id="adjust-notes"
                   value={adjustForm.reason}
                   onChange={(e) => setAdjustForm({...adjustForm, reason: e.target.value})}
-                  className="bg-white/10 border-white/20 text-white"
                   placeholder="Additional details..."
                />
             </div>
@@ -870,36 +892,35 @@ export function ProductDetail() {
 
       {/* Record Sale Dialog */}
       <Dialog open={isRecordSalesDialogOpen} onOpenChange={setIsRecordSalesDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="record-sale-description">
+        <DialogContent className="bg-white text-gray-900" aria-describedby="record-sale-description">
           <DialogHeader>
-            <DialogTitle className="text-white">Record Sale</DialogTitle>
-            <DialogDescription id="record-sale-description" className="text-white/60">
+            <DialogTitle>Record Sale</DialogTitle>
+            <DialogDescription id="record-sale-description" className="text-gray-500">
               Deduct items from stock and record a sale.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-white/80">Current Stock: {product.stock} units</p>
-            <p className="text-white/80">Price: ₹{product.sellingPrice} per unit</p>
+            <p className="text-gray-700">Current Stock: {product.stock} units</p>
+            <p className="text-gray-700">Price: ₹{product.sellingPrice} per unit</p>
             <div>
-              <Label htmlFor="sale-quantity" className="text-white">Quantity Sold</Label>
+              <Label htmlFor="sale-quantity">Quantity Sold</Label>
               <Input
                 id="sale-quantity"
                 type="number"
                 value={salesQuantity}
                 onChange={(e) => setSalesQuantity(e.target.value)}
-                className="bg-white/10 border-white/20 text-white"
                 placeholder="Enter quantity"
                 max={product.stock}
               />
             </div>
-            <p className="text-white/60 text-sm">
+            <p className="text-gray-500 text-sm">
               Total Amount: ₹{(product.sellingPrice * (parseInt(salesQuantity) || 0)).toFixed(2)}
             </p>
-            <p className="text-white/60 text-sm">
+            <p className="text-gray-500 text-sm">
               Remaining Stock: {product.stock - (parseInt(salesQuantity) || 0)} units
             </p>
             <div className="flex gap-2 pt-4">
-              <Button onClick={handleRecordSale} className="flex-1 bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleRecordSale} className="flex-1 bg-[#0F4C81] hover:bg-[#0d3f6a]">
                 Confirm Sale
               </Button>
               <Button onClick={() => setIsRecordSalesDialogOpen(false)} variant="outline" className="flex-1">
@@ -912,16 +933,16 @@ export function ProductDetail() {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="bg-[#0F4C81] border-white/20 text-white" aria-describedby="delete-product-description">
+        <DialogContent className="bg-white text-gray-900" aria-describedby="delete-product-description">
           <DialogHeader>
-            <DialogTitle className="text-white">Delete Product</DialogTitle>
-            <DialogDescription id="delete-product-description" className="text-white/60">
+            <DialogTitle>Delete Product</DialogTitle>
+            <DialogDescription id="delete-product-description" className="text-gray-500">
               Confirm deletion of this product. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-white">Are you sure you want to delete <strong>{product.name}</strong>?</p>
-            <p className="text-white/60 text-sm">This action cannot be undone.</p>
+            <p className="text-gray-900">Are you sure you want to delete <strong>{product.name}</strong>?</p>
+            <p className="text-gray-500 text-sm">This action cannot be undone.</p>
             <div className="flex gap-2 pt-4">
               <Button 
                 onClick={handleDelete} 

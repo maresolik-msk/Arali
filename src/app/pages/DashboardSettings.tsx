@@ -4,9 +4,11 @@ import { Settings as SettingsIcon, Store, Bell, User, CreditCard } from 'lucide-
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
-import { shopSettingsApi, type ShopSettings } from '../services/api';
+import { shopSettingsApi, type ShopSettings, businessVerificationApi } from '../services/api';
 import { toast } from 'sonner';
 import { PWAStatus } from '../components/PWAStatus';
+import { BusinessVerificationModal } from '../components/BusinessVerificationModal';
+import { ShieldCheck, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -30,6 +32,9 @@ export function DashboardSettings() {
   const [phoneNumber, setPhoneNumber] = React.useState('+1 (555) 123-4567');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [verificationStatus, setVerificationStatus] = React.useState<string>('UNVERIFIED');
+  const [verificationMessage, setVerificationMessage] = React.useState<string>('');
+  const [isVerificationModalOpen, setIsVerificationModalOpen] = React.useState(false);
 
   // Load shop settings on mount
   React.useEffect(() => {
@@ -40,6 +45,8 @@ export function DashboardSettings() {
         setStoreAddress(settings.shopAddress || '');
         setContactEmail(settings.contactEmail || '');
         setStoreLogo(settings.shopLogoUrl || '');
+        setVerificationStatus(settings.verificationStatus || 'UNVERIFIED');
+        setVerificationMessage(settings.verificationMessage || '');
       } catch (error) {
         console.error('Error loading shop settings:', error);
         toast.error('Failed to load shop settings');
@@ -202,6 +209,74 @@ export function DashboardSettings() {
               </Button>
             </div>
           </Card>
+
+          {/* Business Verification */}
+          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
+            <div className="relative p-6 space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-[#0F4C81]/5">
+                  <ShieldCheck className="w-6 h-6 text-[#0F4C81]" />
+                </div>
+                <div>
+                  <h3 className="text-foreground">Business Verification</h3>
+                  <p className="text-muted-foreground">Verify your business to unlock premium features</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4 rounded-xl bg-[#0F4C81]/5 border border-[#0F4C81]/10">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-foreground">Status:</span>
+                    {verificationStatus === 'VERIFIED' ? (
+                      <span className="flex items-center gap-1 text-green-600 bg-green-100 px-2 py-0.5 rounded-full text-xs font-medium">
+                        <CheckCircle2 className="w-3 h-3" /> Verified
+                      </span>
+                    ) : verificationStatus === 'PENDING' ? (
+                      <span className="flex items-center gap-1 text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full text-xs font-medium">
+                        <ShieldCheck className="w-3 h-3" /> Pending Review
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-red-600 bg-red-100 px-2 py-0.5 rounded-full text-xs font-medium">
+                        <AlertCircle className="w-3 h-3" /> Unverified
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {verificationStatus === 'VERIFIED' 
+                      ? 'You have full access to Payments, Billing, and Staff Management.' 
+                      : 'Verify your business to unlock Payments, Billing, and Staff Management.'}
+                  </p>
+                  {verificationMessage && verificationStatus === 'REJECTED' && (
+                     <p className="text-xs text-red-600 mt-1">Reason: {verificationMessage}</p>
+                  )}
+                </div>
+                
+                {verificationStatus !== 'VERIFIED' && (
+                  <Button 
+                    className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full whitespace-nowrap"
+                    onClick={() => setIsVerificationModalOpen(true)}
+                    disabled={verificationStatus === 'PENDING'}
+                  >
+                    {verificationStatus === 'PENDING' ? 'Under Review' : 'Verify Business'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          <BusinessVerificationModal 
+            isOpen={isVerificationModalOpen}
+            onClose={() => setIsVerificationModalOpen(false)}
+            onSuccess={() => {
+              setIsVerificationModalOpen(false);
+              // Refresh status
+              shopSettingsApi.get().then(s => {
+                  setVerificationStatus(s.verificationStatus || 'UNVERIFIED');
+                  setVerificationMessage(s.verificationMessage || '');
+              });
+            }}
+          />
 
           {/* Notifications */}
           <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg">

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useLocation } from 'react-router';
 import { 
   Search, 
   ShoppingCart, 
@@ -20,7 +21,8 @@ import {
   Printer,
   Share2,
   History,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -49,9 +51,14 @@ interface HeldBill {
   createdAt: string;
 }
 
+import { ExpressMode } from '../components/sales/ExpressMode';
+
 export function POS() {
+  const location = useLocation();
+  const [isExpressMode, setIsExpressMode] = useState(location.state?.mode === 'express');
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -104,6 +111,7 @@ export function POS() {
         }
       } catch (error) {
         console.error('Error loading data:', error);
+        setError('Failed to load data. Please check your connection.');
         toast.error('Failed to load initial data');
       } finally {
         setIsLoading(false);
@@ -370,6 +378,10 @@ export function POS() {
       window.open(whatsappUrl, '_blank');
   };
 
+  if (isExpressMode) {
+    return <ExpressMode onExit={() => setIsExpressMode(false)} />;
+  }
+
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col md:flex-row gap-6 p-6">
       {/* Left Column: Product Grid */}
@@ -385,6 +397,13 @@ export function POS() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <Button 
+            className="bg-amber-100 hover:bg-amber-200 text-amber-700 border-none shadow-sm"
+            onClick={() => setIsExpressMode(true)}
+          >
+            <Zap className="w-4 h-4 mr-2 fill-current" />
+            Express Mode
+          </Button>
           <ScrollArea className="w-full sm:w-auto whitespace-nowrap pb-2 sm:pb-0">
             <div className="flex gap-2">
               {categories.map(cat => (
@@ -406,6 +425,14 @@ export function POS() {
           {isLoading ? (
             <div className="flex items-center justify-center h-full">
               <div className="w-8 h-8 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin" />
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center h-full text-red-500 gap-4">
+              <AlertCircle className="w-12 h-12" />
+              <p>{error}</p>
+              <Button onClick={() => window.location.reload()} variant="outline" className="border-red-200 hover:bg-red-50 text-red-600">
+                Retry
+              </Button>
             </div>
           ) : filteredProducts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">

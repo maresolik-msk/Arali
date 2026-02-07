@@ -19,6 +19,7 @@ import { Orders } from './pages/Orders';
 import { Customers } from './pages/Customers';
 import { Vendors } from './pages/Vendors';
 import { Analytics } from './pages/Analytics';
+import { RevenueDetailed } from './pages/RevenueDetailed';
 import { DashboardSettings } from './pages/DashboardSettings';
 import { AIInsights } from './pages/AIInsights';
 import { ProductDetail } from './pages/ProductDetail';
@@ -156,6 +157,7 @@ const router = createBrowserRouter([
       { path: "inventory", element: <Inventory /> },
       { path: "inventory/:productId", element: <ProductDetail /> },
       { path: "notepad", element: <SmartSalesNotepad /> },
+      { path: "express", element: <SmartSalesNotepad /> },
       { path: "purchase-notepad", element: <SmartPurchaseNotepad /> },
       { path: "orders", element: <Orders /> },
       { path: "customers", element: <Customers /> },
@@ -172,6 +174,7 @@ const router = createBrowserRouter([
           </FeatureGuard>
         ) 
       },
+      { path: "revenue", element: <RevenueDetailed /> },
       { 
         path: "insights", 
         element: (

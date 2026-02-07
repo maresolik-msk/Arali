@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import svgPaths from "@/imports/svg-mkjwe92tm9";
+import bottomNavSvgs from "@/imports/svg-7oxij0di9j";
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard,
@@ -21,6 +22,8 @@ import {
   ScanLine,
   ClipboardList,
   Zap,
+  ShieldCheck,
+  TrendingUp,
 } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { Button } from '../ui/button';
@@ -29,7 +32,8 @@ import { Toaster } from '../ui/sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePlan } from '../../hooks/usePlan';
 import { NotificationCenter } from './NotificationCenter';
-import { notificationsApi, productsApi } from '../../services/api';
+import { DashboardTopBar } from './DashboardTopBar';
+import { notificationsApi, productsApi, shopSettingsApi } from '../../services/api';
 import { getExpiringProducts } from '../../data/dashboardData';
 
 const navItems = [
@@ -69,6 +73,11 @@ const navItems = [
     icon: Truck,
   },
   {
+    title: 'Revenue Detailed',
+    href: '/dashboard/revenue',
+    icon: TrendingUp,
+  },
+  {
     title: 'Analytics',
     href: '/dashboard/analytics',
     icon: ChartLine,
@@ -94,10 +103,28 @@ export function DashboardLayout() {
   const navigate = useNavigate();
   const { signOut, isAuthenticated, isLoading, user } = useAuth();
   const { limits, isEnterprise } = usePlan();
+  const [verificationStatus, setVerificationStatus] = useState<string>('UNVERIFIED');
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      shopSettingsApi.get().then(s => setVerificationStatus(s.verificationStatus || 'UNVERIFIED')).catch(() => {});
+    }
+  }, [isAuthenticated]);
 
   const filteredNavItems = navItems.filter(item => {
     if (item.title === 'Analytics') return limits.canViewReports;
     if (item.title === 'AI Insights') return limits.canForecast;
+    
+    // Feature Gating: Lock money/customer features if not verified
+    if (verificationStatus !== 'VERIFIED') {
+        // Allow Dashboard, Inventory, Purchase, Settings
+        // Block POS, Orders, Customers, Vendors, Revenue Detailed
+        if (['POS', 'Orders', 'Customers', 'Vendors', 'Revenue Detailed'].includes(item.title)) {
+            return false;
+        }
+    }
+    
     return true;
   });
 
@@ -111,8 +138,8 @@ export function DashboardLayout() {
     loadUnreadCount();
     checkExpiringProducts();
     
-    // Poll for updates every 60 seconds (increased from 30)
-    const interval = setInterval(loadUnreadCount, 60000);
+    // Poll for updates every 5 minutes (increased from 60s to reduce server load)
+    const interval = setInterval(loadUnreadCount, 300000);
     return () => clearInterval(interval);
   }, [isLoading, isAuthenticated]);
 
@@ -204,6 +231,41 @@ export function DashboardLayout() {
     { title: 'Orders', href: '/dashboard/orders', icon: ShoppingCart },
   ];
 
+  const getNotepadTab = () => {
+    if (location.pathname.includes('purchase-notepad')) return 'Purchase';
+    if (location.pathname.includes('notepad') || location.pathname.includes('express')) {
+       const params = new URLSearchParams(location.search);
+       if (params.get('mode') === 'owner') return 'Owner';
+       return 'Sale';
+    }
+    return undefined;
+  };
+
+  const handleNotepadTabChange = (tab: 'Sale' | 'Purchase' | 'Owner') => {
+    if (tab === 'Purchase') {
+      navigate('/dashboard/purchase-notepad');
+    } else if (tab === 'Owner') {
+      navigate('/dashboard/notepad?mode=owner');
+    } else {
+      navigate('/dashboard/express');
+    }
+  };
+
+  const getPageTitle = () => {
+    if (location.pathname.includes('express')) return 'Express Mode';
+    if (location.pathname.includes('notepad')) return 'Smart Notepad';
+    
+    // Find the matching nav item
+    // Sort by length desc to match most specific path first (e.g. /dashboard/orders vs /dashboard)
+    const sortedItems = [...navItems].sort((a, b) => b.href.length - a.href.length);
+    const match = sortedItems.find(item => {
+      if (item.href === '/dashboard') return location.pathname === '/dashboard';
+      return location.pathname.startsWith(item.href);
+    });
+    
+    return match ? match.title : 'Dashboard';
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F5F9FC] via-[#EBF4FA] to-[#F5F9FC]">
       {/* Desktop Sidebar */}
@@ -244,8 +306,23 @@ export function DashboardLayout() {
             })}
           </nav>
 
-          {/* Upgrade CTA */}
-          {!isEnterprise && (
+          {/* Verification / Upgrade CTA */}
+          {verificationStatus !== 'VERIFIED' ? (
+             <div className="px-4 pb-4">
+              <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-2xl p-4 text-white relative overflow-hidden shadow-lg">
+                 <div className="absolute top-0 right-0 -mr-4 -mt-4 w-20 h-20 bg-white/10 rounded-full blur-xl" />
+                 
+                 <h3 className="font-bold text-sm mb-1">Verify Business</h3>
+                 <p className="text-xs text-white/90 mb-3">Unlock POS & Payments</p>
+                 <Link to="/dashboard/settings">
+                   <Button size="sm" variant="secondary" className="w-full bg-white text-amber-600 hover:bg-white/90 text-xs h-8 border-none">
+                     <ShieldCheck className="w-3 h-3 mr-1" />
+                     Verify Now
+                   </Button>
+                 </Link>
+              </div>
+            </div>
+          ) : !isEnterprise && (
             <div className="px-4 pb-4">
               <div className="bg-gradient-to-br from-[#0F4C81] to-[#1E6091] rounded-2xl p-4 text-white relative overflow-hidden shadow-lg">
                  <div className="absolute top-0 right-0 -mr-4 -mt-4 w-20 h-20 bg-white/10 rounded-full blur-xl" />
@@ -359,8 +436,21 @@ export function DashboardLayout() {
                   })}
                 </nav>
 
-                {/* Upgrade CTA */}
-                {!isEnterprise && (
+                {/* Verification / Upgrade CTA */}
+                {verificationStatus !== 'VERIFIED' ? (
+                   <div className="px-4 pb-4">
+                    <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-2xl p-4 text-white relative overflow-hidden shadow-lg">
+                       <h3 className="font-bold text-sm mb-1">Verify Business</h3>
+                       <p className="text-xs text-white/90 mb-3">Unlock POS & Payments</p>
+                       <Link to="/dashboard/settings" onClick={() => setSidebarOpen(false)}>
+                         <Button size="sm" variant="secondary" className="w-full bg-white text-amber-600 hover:bg-white/90 text-xs h-8 border-none">
+                           <ShieldCheck className="w-3 h-3 mr-1" />
+                           Verify Now
+                         </Button>
+                       </Link>
+                    </div>
+                  </div>
+                ) : !isEnterprise && (
                   <div className="px-4 pb-4">
                     <div className="bg-gradient-to-br from-[#0F4C81] to-[#1E6091] rounded-2xl p-4 text-white relative overflow-hidden shadow-lg">
                        <div className="absolute top-0 right-0 -mr-4 -mt-4 w-20 h-20 bg-white/10 rounded-full blur-xl" />
@@ -396,7 +486,17 @@ export function DashboardLayout() {
       {/* Main Content */}
       <div className="lg:pl-72">
         {/* Top Bar */}
-        <header className="sticky top-0 z-30 h-24 bg-white/80 backdrop-blur-xl border-b border-[#0F4C81]/10 shadow-sm">
+        <DashboardTopBar 
+          onMenuClick={() => setSidebarOpen(true)}
+          onNotificationClick={handleNotificationClick}
+          unreadCount={unreadCount}
+          className="sticky top-0 lg:hidden"
+          variant={(location.pathname.includes('notepad') || location.pathname.includes('express')) ? 'notepad' : 'default'}
+          activeTab={getNotepadTab()}
+          onTabChange={handleNotepadTabChange}
+          title={getPageTitle()}
+        />
+        <header className="hidden lg:flex sticky top-0 z-30 h-24 bg-white/80 backdrop-blur-xl border-b border-[#0F4C81]/10 shadow-sm">
           <div className="h-full px-6 flex items-center justify-between gap-4">
             {/* Mobile Menu Button */}
             <button
@@ -446,56 +546,111 @@ export function DashboardLayout() {
       </div>
 
       {/* Mobile Bottom Navigation */}
-      <div className="fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 px-2 sm:px-6 flex justify-between items-end pointer-events-none lg:hidden">
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white flex items-center justify-between px-6 py-3 pb-[calc(12px+env(safe-area-inset-bottom))] border-t border-[#F0F2F4] lg:hidden">
         
-        {/* Left: Add Button */}
+        {/* Home */}
         <Link
-          to="/dashboard/inventory?action=add"
-          className="pointer-events-auto group relative"
+          to="/dashboard"
+          className="flex flex-col items-center justify-center gap-1 min-w-[3rem] group"
         >
-          <div className="bg-[#0F4C81] w-[48px] h-[48px] sm:w-[56px] sm:h-[56px] rounded-full flex items-center justify-center shadow-[0px_8px_10px_-6px_rgba(15,76,129,0.3)] border-[4px] border-[#F5F9FC] transition-transform active:scale-95">
-             <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="scale-90 sm:scale-100">
-               <path d={svgPaths.pe998d00} fill="white" />
-             </svg>
+          <div className="relative w-[26px] h-[26px]">
+            <svg className="w-full h-full" viewBox="0 0 22 22" fill="none">
+              <path d={bottomNavSvgs.p21674600} fill={isActive('/dashboard') ? "#0F4C81" : "#546F86"} fillOpacity={isActive('/dashboard') ? "0.16" : "0"} />
+              <path d={bottomNavSvgs.p26828100} fill={isActive('/dashboard') ? "#0F4C81" : "#546F86"} />
+            </svg>
           </div>
+          {isActive('/dashboard') && (
+            <span className="text-[10px] font-['Mplus_1p:Medium',sans-serif] leading-[15px] tracking-[0.12px] text-[#0F4C81]">Home</span>
+          )}
         </Link>
-    
-        {/* Center: Navigation Pill */}
-        <div className="pointer-events-auto bg-white h-[48px] sm:h-[56px] px-2 rounded-[46px] shadow-[0px_4px_24px_0px_rgba(0,0,0,0.12)] flex items-center gap-1">
-           {/* Home */}
-           <Link to="/dashboard" className={cn("w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full transition-colors", isActive('/dashboard') ? "bg-[#F0F2F4]" : "hover:bg-gray-50")}>
-             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="scale-90 sm:scale-100">
-               <path d={svgPaths.p5b53800} fill={isActive('/dashboard') ? "black" : "transparent"} stroke="black" strokeWidth="1.225" strokeOpacity={isActive('/dashboard') ? "1" : "0.5"} />
+
+        {/* Inventory (Box) */}
+        <Link
+          to="/dashboard/inventory"
+          className="flex flex-col items-center justify-center gap-1 min-w-[3rem] group"
+        >
+          <div className="relative w-[26px] h-[26px]">
+            <svg className="w-full h-full" viewBox="0 0 26 26" fill="none">
+              <path d={bottomNavSvgs.p11dc5840} stroke={isActive('/dashboard/inventory') ? "#0F4C81" : "#546F86"} strokeLinejoin="round" />
+            </svg>
+          </div>
+          {isActive('/dashboard/inventory') && (
+            <span className="text-[10px] font-medium text-[#0F4C81]">Stock</span>
+          )}
+        </Link>
+
+        {/* Add Button (Plus) */}
+        <div className="relative -top-8 group">
+          <AnimatePresence>
+            {addMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setAddMenuOpen(false)} />
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 bg-white rounded-xl shadow-xl border border-[#0F4C81]/10 p-2 min-w-[160px] flex flex-col gap-1 z-50"
+                >
+                  <Link
+                    to="/dashboard/notepad"
+                    onClick={() => setAddMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-[#F5F9FC] rounded-lg text-[#082032] transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-[#0F4C81]/10 flex items-center justify-center text-[#0F4C81]">
+                      <ClipboardList size={16} />
+                    </div>
+                    <span className="font-medium text-sm">Note</span>
+                  </Link>
+                  <Link
+                    to="/dashboard/inventory?action=add"
+                    onClick={() => setAddMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-[#F5F9FC] rounded-lg text-[#082032] transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-[#0F4C81]/10 flex items-center justify-center text-[#0F4C81]">
+                      <Package size={16} />
+                    </div>
+                    <span className="font-medium text-sm">Product</span>
+                  </Link>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+          <button
+            onClick={() => setAddMenuOpen(!addMenuOpen)}
+            className="w-[56px] h-[56px] bg-[#0F4C81] rounded-full flex items-center justify-center shadow-[0px_8px_10px_-6px_rgba(15,76,129,0.3)] border-[4px] border-white transition-transform active:scale-95"
+          >
+             <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className={cn("transition-transform duration-300", addMenuOpen && "rotate-45")}>
+               <path d={bottomNavSvgs.pe998d00} fill="white" />
              </svg>
-           </Link>
-    
-           {/* Stock */}
-           <Link to="/dashboard/inventory" className={cn("w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full transition-colors", isActive('/dashboard/inventory') && !location.search ? "bg-[#F0F2F4]" : "hover:bg-gray-50")}>
-             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="scale-90 sm:scale-100">
-               <path d={svgPaths.pdea4710} stroke="black" strokeLinejoin="round" strokeOpacity={isActive('/dashboard/inventory') && !location.search ? "1" : "0.5"} strokeWidth="1.4" />
-             </svg>
-           </Link>
-    
-           {/* Insights (Bulb) */}
-           <Link to="/dashboard/pos" className={cn("w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full transition-colors", isActive('/dashboard/pos') ? "bg-[#F0F2F4]" : "hover:bg-gray-50")}>
-             <ScanLine className={cn("w-5 h-5 sm:w-6 sm:h-6", isActive('/dashboard/pos') ? "text-black" : "text-black/50")} strokeWidth={1.4} />
-           </Link>
-    
-           {/* Menu */}
-           <button onClick={() => setSidebarOpen(true)} className="w-[36px] h-[36px] sm:w-[42px] sm:h-[42px] flex items-center justify-center rounded-full hover:bg-gray-50">
-             <div className="flex items-center justify-center w-full h-full">
-               <svg width="18" height="12" viewBox="0 0 18 12" fill="none" className="scale-90 sm:scale-100">
-                 <path clipRule="evenodd" d={svgPaths.p2166df00} fill="black" fillOpacity="0.5" fillRule="evenodd" />
-               </svg>
-             </div>
-           </button>
+          </button>
         </div>
-    
-        {/* Right: AI Button */}
-        <Link to="/dashboard/insights" className="pointer-events-auto bg-white w-[48px] h-[48px] sm:w-[56px] sm:h-[56px] rounded-full flex items-center justify-center shadow-[0px_0px_44px_0px_rgba(0,0,0,0.16)] transition-transform active:scale-95">
-           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="scale-90 sm:scale-100">
-             <path d={svgPaths.p1a0eb580} fill="#0F4C81" />
-           </svg>
+
+        {/* Notepad (Edit Pen) */}
+        <Link
+          to="/dashboard/express"
+          className="flex flex-col items-center justify-center gap-1 min-w-[3rem] group cursor-pointer"
+        >
+          <div className={cn("relative w-[24px] h-[24px] flex items-center justify-center", isActive('/dashboard/express') ? "text-[#0F4C81]" : "text-[#546F86]")}>
+             <Zap className="w-6 h-6" strokeWidth={isActive('/dashboard/express') ? 2 : 1.5} fill={isActive('/dashboard/express') ? "currentColor" : "none"} />
+          </div>
+          {isActive('/dashboard/express') && (
+            <span className="text-[10px] font-medium text-[#0F4C81]">Express</span>
+          )}
+        </Link>
+
+        {/* AI Insights (Sparkles) */}
+        <Link
+          to="/dashboard/insights"
+          className="flex flex-col items-center justify-center gap-1 min-w-[3rem] group"
+        >
+          <div className={cn("relative w-[26px] h-[26px] rounded-full flex items-center justify-center", !isActive('/dashboard/insights') && "shadow-[0px_0px_44px_0px_rgba(0,0,0,0.16)]")}>
+            <svg className="w-full h-full" viewBox="0 0 26 26" fill="none">
+              <path d={bottomNavSvgs.p34fb2b40} fill={isActive('/dashboard/insights') ? "#0F4C81" : "#546F86"} />
+            </svg>
+          </div>
+          {isActive('/dashboard/insights') && (
+            <span className="text-[10px] font-medium text-[#0F4C81]">AI</span>
+          )}
         </Link>
       </div>
 

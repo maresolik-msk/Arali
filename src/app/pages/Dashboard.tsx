@@ -13,7 +13,8 @@ import {
   Store,
   ScanLine,
   Search,
-  ClipboardList
+  ClipboardList,
+  Zap
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
@@ -153,6 +154,16 @@ export function Dashboard() {
       bgIcon: <ScanLine size={64} />,
       onClick: () => navigate('/dashboard/pos'),
       variant: 'primary'
+    });
+
+    // Express Mode (High Priority)
+    actions.push({
+      title: "Express Mode",
+      desc: "Fast checkout",
+      icon: <Zap size={28} className="mb-4 text-amber-700" />,
+      bgIcon: <Zap size={64} className="text-amber-500/20" />,
+      onClick: () => navigate('/dashboard/pos', { state: { mode: 'express' } }),
+      variant: 'express'
     });
 
     // Time-based & Context-based Actions
@@ -296,14 +307,17 @@ export function Dashboard() {
             <TrendingUp size={20} /> Store Pulse
           </h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-[#0F4C81]/5 shadow-sm hover:shadow-md transition-shadow">
+            <div 
+              onClick={() => navigate('/dashboard/express?mode=owner')}
+              className="bg-white p-5 rounded-2xl border border-[#0F4C81]/5 shadow-sm hover:shadow-md transition-all cursor-pointer group"
+            >
               <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-green-50 rounded-lg text-green-600">
+                <div className="p-2 bg-green-50 rounded-lg text-green-600 group-hover:bg-green-100 transition-colors">
                   <ShoppingCart size={18} />
                 </div>
                 <span className="text-sm font-medium text-gray-500">Total Sales</span>
               </div>
-              <div className="text-2xl font-bold text-[#082032]">₹{(orders.reduce((acc, curr) => acc + curr.total, 0)).toLocaleString()}</div>
+              <div className="text-2xl font-bold text-[#082032]">₹{(orders.reduce((acc, curr) => acc + curr.totalAmount, 0)).toLocaleString()}</div>
               <div className="text-xs text-green-600 flex items-center gap-1 mt-1 font-medium">
                 <ArrowUpRight size={12} />
                 <span>+12% vs last week</span>
@@ -363,6 +377,8 @@ export function Dashboard() {
                   "group p-6 rounded-2xl text-left relative overflow-hidden transition-all",
                   action.variant === 'primary' 
                     ? "bg-gradient-to-br from-[#0F4C81] to-[#1E6091] text-white shadow-lg shadow-[#0F4C81]/20 hover:scale-[1.02]" 
+                    : action.variant === 'express'
+                    ? "bg-gradient-to-br from-amber-100 to-amber-200 text-amber-900 border border-amber-200/50 hover:scale-[1.02]"
                     : "bg-white border border-[#0F4C81]/10 text-[#0F4C81] hover:border-[#0F4C81]/30 hover:shadow-md"
                 )}
               >
@@ -372,7 +388,7 @@ export function Dashboard() {
                   </div>
                 )}
                 
-                {action.variant === 'primary' ? (
+                {action.variant === 'primary' || action.variant === 'express' ? (
                   action.icon
                 ) : (
                   <div className="bg-[#0F4C81]/5 w-12 h-12 rounded-xl flex items-center justify-center mb-4 group-hover:bg-[#0F4C81]/10 transition-colors">
@@ -388,7 +404,7 @@ export function Dashboard() {
                 </div>
                 <div className={cn(
                   "text-sm",
-                  action.variant === 'primary' ? "text-white/70" : "text-[#082032]/60"
+                  action.variant === 'primary' ? "text-white/70" : action.variant === 'express' ? "text-amber-800/70" : "text-[#082032]/60"
                 )}>
                   {action.desc}
                 </div>
@@ -428,7 +444,7 @@ export function Dashboard() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold text-[#0F4C81]">₹{order.total.toLocaleString()}</div>
+                      <div className="font-bold text-[#0F4C81]">₹{order.totalAmount.toLocaleString()}</div>
                       <div className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-block mt-1">
                         Completed
                       </div>
