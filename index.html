@@ -3,11 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Arali - Premium Retail Management</title>
-    <meta name="description" content="Run your business with quiet confidence. Arali helps small businesses track inventory, reduce waste, and grow visibility." />
-    
-    <!-- PWA Meta Tags -->
+    <title>Arali — Your Daily Shop, Made Simpler</title>
+    <meta name="description" content="Arali helps retail shop owners manage sales, inventory, and insights in one simple dashboard. Less worry. More control." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://www.aralimsk.com/" />
+
+    <!-- Open Graph Tags (Social + Investor Sharing) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Arali — Your Daily Shop, Made Simpler" />
+    <meta property="og:description" content="Run your retail store with clarity. Track sales, manage inventory, and get insights that reduce waste and improve profit." />
+    <meta property="og:url" content="https://www.aralimsk.com/" />
+    <meta property="og:site_name" content="Arali" />
+    <meta property="og:image" content="https://www.aralimsk.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter / X Card Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Arali — Your Daily Shop, Made Simpler" />
+    <meta name="twitter:description" content="One place to manage sales, inventory, and daily shop decisions. Built for modern retailers." />
+    <meta name="twitter:image" content="https://www.aralimsk.com/og-image.png" />
+
+    <!-- AI & Crawler Friendly Signals -->
+    <meta name="application-name" content="Arali" />
     <meta name="theme-color" content="#0F4C81" />
+    <meta name="author" content="Arali" />
+
+    <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Arali" />
@@ -33,24 +55,112 @@
     <link rel="apple-touch-startup-image" href="/splash/apple-splash-1242-2208.png" media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
     <link rel="apple-touch-startup-image" href="/splash/apple-splash-750-1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
     <link rel="apple-touch-startup-image" href="/splash/apple-splash-640-1136.png" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
-    
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://arali.app/" />
-    <meta property="og:title" content="Arali - Premium Retail Management" />
-    <meta property="og:description" content="Run your business with quiet confidence. Arali helps small businesses track inventory, reduce waste, and grow visibility." />
-    <meta property="og:image" content="https://images.unsplash.com/photo-1753161029114-857c9f494ccd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaG9wJTIwb3duZXIlMjB0YWJsZXR8ZW58MXx8fHwxNzY2NjQ1NjEzfDA&ixlib=rb-4.1.0&q=80&w=1080" />
 
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://arali.app/" />
-    <meta property="twitter:title" content="Arali - Premium Retail Management" />
-    <meta property="twitter:description" content="Run your business with quiet confidence. Arali helps small businesses track inventory, reduce waste, and grow visibility." />
-    <meta property="twitter:image" content="https://images.unsplash.com/photo-1753161029114-857c9f494ccd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzaG9wJTIwb3duZXIlMjB0YWJsZXR8ZW58MXx8fHwxNzY2NjQ1NjEzfDA&ixlib=rb-4.1.0&q=80&w=1080" />
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Arali",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "Arali is a retail management platform that helps shop owners manage sales, inventory, and insights in one simple dashboard.",
+      "url": "https://www.aralimsk.com/",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "INR"
+      }
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Arali",
+      "url": "https://www.aralimsk.com/",
+      "logo": "https://www.aralimsk.com/logo.png"
+    }
+    </script>
+
+    <!-- Critical CSS for HTML Fallback -->
+    <style>
+      /* Fallback CSS for non-JS environment or before Hydration */
+      body { margin: 0; font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; color: #082032; }
+      .ssr-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+      .ssr-header { padding: 20px 0; display: flex; justify-content: space-between; align-items: center; }
+      .ssr-brand { font-weight:bold; font-size:1.5rem; color:#0F4C81; text-decoration: none; }
+      .ssr-hero { padding: 60px 20px; text-align: center; background-color: #F5F9FC; border-radius: 20px; margin-bottom: 40px; }
+      .ssr-h1 { font-size: 2.5rem; color: #0F4C81; font-weight: 700; margin-bottom: 20px; line-height: 1.1; }
+      @media (min-width: 768px) { .ssr-h1 { font-size: 4rem; } }
+      .ssr-p { font-size: 1.25rem; color: rgba(8, 32, 50, 0.6); max-width: 600px; margin: 0 auto 40px; }
+      .ssr-btn { display: inline-block; background: #0F4C81; color: white; padding: 16px 32px; border-radius: 50px; text-decoration: none; font-weight: 500; font-size: 1.1rem; }
+      .ssr-section { padding: 40px 0; }
+      .ssr-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px; margin-top: 40px; }
+      .ssr-card { background: #fff; padding: 30px; border-radius: 15px; border: 1px solid rgba(15, 76, 129, 0.1); }
+      .ssr-h2 { color: #0F4C81; font-size: 2rem; margin-bottom: 20px; text-align: center; }
+      .ssr-h3 { font-size: 1.25rem; margin-bottom: 10px; font-weight: 600; color: #082032; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <noscript>This site requires JavaScript. To view this website, enable JavaScript in your browser settings and reload the page.</noscript>
+    <div id="root">
+      <!-- HTML Fallback / SSR Content for SEO and Non-JS Users -->
+      <div class="ssr-container">
+        <header class="ssr-header">
+          <a href="/" class="ssr-brand">Arali</a>
+          <nav>
+            <a href="/login" style="color:#0F4C81; text-decoration:none; font-weight:500;">Login</a>
+          </nav>
+        </header>
+        
+        <main>
+          <section class="ssr-hero">
+            <div style="font-size: 0.75rem; text-transform:uppercase; letter-spacing:1px; color:#0F4C81; margin-bottom:20px; font-weight:600;">Simple Inventory for Shops</div>
+            <h1 class="ssr-h1">Run your business with <br><span style="opacity:0.6">confidence.</span></h1>
+            <p class="ssr-p">Reduce waste, track inventory, and grow visibility. No complex tools, just peace of mind.</p>
+            <a href="/login" class="ssr-btn">Start for free</a>
+          </section>
+
+          <section class="ssr-section">
+            <h2 class="ssr-h2">The hidden cost of running a shop.</h2>
+            <div class="ssr-features">
+              <article class="ssr-card">
+                <h3 class="ssr-h3">Paper Tracking</h3>
+                <p>Notebooks get lost, pages tear, and history fades. Keep your records digital and safe.</p>
+              </article>
+              <article class="ssr-card">
+                <h3 class="ssr-h3">Unsold Stock</h3>
+                <p>Expired goods mean wasted money. Get alerts before items expire.</p>
+              </article>
+              <article class="ssr-card">
+                <h3 class="ssr-h3">No Visibility</h3>
+                <p>Customers don't know what you have until they walk in. Share updates instantly.</p>
+              </article>
+              <article class="ssr-card">
+                <h3 class="ssr-h3">Daily Anxiety</h3>
+                <p>Not knowing if you'll break even today? Get real-time sales visibility.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="ssr-section" style="text-align:center; padding-top: 60px;">
+             <h2 class="ssr-h2">Ready to take back control?</h2>
+             <p class="ssr-p">Join the quiet revolution of smart retail owners. No credit card required.</p>
+             <a href="/get-started" class="ssr-btn">Get Started Now</a>
+          </section>
+        </main>
+        
+        <footer style="text-align:center; padding: 60px 0 20px; font-size: 0.9rem; color: rgba(8,32,50,0.5); border-top: 1px solid rgba(0,0,0,0.05); margin-top: 40px;">
+          &copy; 2026 Arali. All rights reserved.
+        </footer>
+      </div>
+    </div>
+    <noscript>
+      <div style="padding: 20px; background: #fff3cd; color: #856404; text-align: center; border-bottom: 1px solid #ffeeba;">
+        <strong>JavaScript is required to use the full application.</strong> However, you can browse our features above.
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
