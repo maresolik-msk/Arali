@@ -383,57 +383,68 @@ export async function verifyOTPAndResetPassword(
 }
 
 // ========================================
-// PHONE AUTHENTICATION
+// PHONE AUTHENTICATION (CUSTOM KV BACKEND)
 // ========================================
 
 // Sign in with Phone (Sends OTP)
 export async function signInWithPhone(phone: string): Promise<void> {
-  // Ensure the phone number is clean
   const cleanPhone = phone.trim();
-  console.log('[Auth] Attempting phone sign in with formatted number:', cleanPhone);
-  
-  const { error } = await supabase.auth.signInWithOtp({
-    phone: cleanPhone,
-    options: {
-      shouldCreateUser: true
-    }
+  console.log('[Auth] Attempting custom phone sign in with:', cleanPhone);
+
+  const response = await fetch(`${API_BASE_URL}/auth/otp/send`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${publicAnonKey}`,
+    },
+    body: JSON.stringify({ mobile_number: cleanPhone }),
   });
 
-  if (error) {
-    console.error('Phone sign in error:', error);
-    // Explicitly check for the 60200 error to provide a better message
-    if (error.message?.includes('Invalid parameter') || JSON.stringify(error).includes('60200')) {
-       // This error often comes from Twilio when the number is not verified (on trial accounts) or truly invalid
-       throw new Error(`Provider rejected '${cleanPhone}'. If you are on a free tier, ensure the number is verified.`);
-    }
-    throw new Error(error.message || 'Failed to send OTP');
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error('Phone sign in error:', data);
+    throw new Error(data.error || 'Failed to send OTP');
+  }
+  
+  // Return early success. The UI will handle showing the OTP input.
+  // Note: The backend returns { success: true, otp: "..." } in dev mode.
+  if (data.otp) {
+    console.log('DEV OTP:', data.otp);
+    // We can't easily return the OTP to the UI without changing the interface, 
+    // but the console log will help for testing.
   }
 }
 
 // Verify Phone OTP
 export async function verifyPhoneOtp(phone: string, token: string): Promise<AuthState> {
-  const { data, error } = await supabase.auth.verifyOtp({
-    phone,
-    token,
-    type: 'sms',
+  const cleanPhone = phone.trim();
+  
+  const response = await fetch(`${API_BASE_URL}/auth/otp/verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${publicAnonKey}`,
+    },
+    body: JSON.stringify({ mobile_number: cleanPhone, otp: token }),
   });
 
-  if (error) {
-    console.error('Verify Phone OTP error:', error);
-    throw new Error(error.message || 'Invalid code');
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error('Verify Phone OTP error:', data);
+    throw new Error(data.error || 'Invalid code');
   }
 
-  if (!data.session) {
-    throw new Error('Verification successful but no session created');
-  }
-  
+  // Map backend user to frontend User interface
+  // Backend returns: { id, mobile_number, role, created_at }
   const user: User = {
     id: data.user.id,
-    email: data.user.email || '',
-    phone: data.user.phone,
-    name: data.user.user_metadata.name || 'User',
-    plan: (data.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
-    hasSelectedPlan: !!data.user.user_metadata.plan_selected,
+    email: data.user.mobile_number, // Use mobile as email identifier for compatibility
+    phone: data.user.mobile_number,
+    name: data.user.mobile_number, // Default name to mobile number
+    plan: DEFAULT_PLAN,
+    hasSelectedPlan: false,
   };
 
   // Store auth state
@@ -446,4 +457,41 @@ export async function verifyPhoneOtp(phone: string, token: string): Promise<Auth
     accessToken: data.session.access_token,
     isAuthenticated: true,
   };
+}
+
+// Update User Profile (Plan Selection)
+export async function updateUserProfile(updates: Partial<User> & { plan_selected?: boolean }): Promise<void> {
+  const token = localStorage.getItem('auth_token');
+  if (!token) throw new Error('No auth token found');
+
+  // If using Supabase Auth (token doesn't start with access_), use Supabase API
+  // However, Supabase updateUser only updates user_metadata.
+  if (!token.startsWith('access_')) {
+    const metadataUpdates: any = {};
+    if (updates.plan) metadataUpdates.plan = updates.plan;
+    if (updates.plan_selected !== undefined) metadataUpdates.plan_selected = updates.plan_selected;
+    if (updates.name) metadataUpdates.name = updates.name;
+
+    const { error } = await supabase.auth.updateUser({
+      data: metadataUpdates
+    });
+    
+    if (error) throw error;
+    return;
+  }
+
+  // Use Custom Backend for KV users
+  const response = await fetch(`${API_BASE_URL}/user/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(updates),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to update profile');
+  }
 }

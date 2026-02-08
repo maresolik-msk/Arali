@@ -3,6 +3,8 @@ import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as kv from "./kv_store.tsx";
+import * as otpService from "./otp_service.ts";
+import * as authService from "./auth_service.ts";
 import { parseSalesNote, parsePurchaseNote, parseMultiIntent, generateDailyBrief, generateOwnerAnswer } from "./aiService.tsx";
 import { aiInsightsEngine } from "./aiInsightsEngine.tsx";
 import { dashboardService } from "./dashboardService.tsx";
@@ -50,7 +52,91 @@ app.get("/make-server-29b58f9a/health", (c) => {
 });
 
 // ========================================
-// AUTHENTICATION ENDPOINTS
+// OTP AUTHENTICATION ENDPOINTS
+// ========================================
+
+// Send OTP
+app.post("/make-server-29b58f9a/auth/otp/send", async (c) => {
+  try {
+    const { mobile_number } = await c.req.json();
+    if (!mobile_number) return c.json({ error: "Mobile number is required" }, 400);
+
+    const result = await otpService.createOTP(mobile_number);
+    return c.json(result);
+  } catch (error) {
+    console.error("Error sending OTP:", error);
+    return c.json({ error: "Failed to send OTP", details: String(error) }, 500);
+  }
+});
+
+// Verify OTP & Login
+app.post("/make-server-29b58f9a/auth/otp/verify", async (c) => {
+  try {
+    const { mobile_number, otp } = await c.req.json();
+    if (!mobile_number || !otp) return c.json({ error: "Mobile number and OTP are required" }, 400);
+    
+    const verification = await otpService.verifyOTPCode(mobile_number, otp);
+    if (!verification.success) return c.json({ error: verification.error }, 400);
+
+    let user;
+    if (verification.isNewUser) {
+      user = await authService.createUser(mobile_number);
+    } else {
+      user = await kv.get(`user:mobile:${mobile_number}`);
+    }
+
+    const tokens = await authService.createAuthTokens(user);
+    return c.json({ session: tokens, user, isNewUser: verification.isNewUser });
+  } catch (error) {
+    console.error("Error verifying OTP:", error);
+    return c.json({ error: "Failed to verify OTP", details: String(error) }, 500);
+  }
+});
+
+// Update User Profile (Plan Selection)
+app.put("/make-server-29b58f9a/user/profile", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    
+    const updates = await c.req.json();
+    const userId = user.id;
+
+    // Fetch existing user from KV to ensure we don't overwrite other fields
+    const existingUser = await kv.get(`user:id:${userId}`);
+    if (!existingUser) {
+      return c.json({ error: "User not found" }, 404);
+    }
+    
+    // Merge updates
+    const updatedUser = {
+      ...existingUser,
+      ...updates,
+      // Ensure protected fields aren't overwritten by client if needed, 
+      // but here we trust the schema for now or filter:
+      plan: updates.plan || existingUser.plan,
+      plan_selected: updates.plan_selected !== undefined ? updates.plan_selected : existingUser.plan_selected
+    };
+
+    // Update both indices
+    await kv.set(`user:id:${userId}`, updatedUser);
+    if (updatedUser.mobile_number) {
+       await kv.set(`user:mobile:${updatedUser.mobile_number}`, updatedUser);
+    }
+    
+    console.log(`User profile updated for ${userId}`);
+    
+    return c.json({ success: true, user: updatedUser });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    return c.json({ error: "Failed to update profile", details: String(error) }, 500);
+  }
+});
+
+// ========================================
+// SUPABASE AUTHENTICATION ENDPOINTS
 // ========================================
 
 // Sign up new user
@@ -154,6 +240,29 @@ async function verifyAuth(authHeader: string | null) {
   const token = authHeader.split(' ')[1];
   if (!token) {
     return { user: null, error: "Invalid authorization header" };
+  }
+
+  // Check Custom OTP Auth Token
+  if (token.startsWith('access_')) {
+    const session = await kv.get(`auth:token:${token}`);
+    if (session && new Date(session.expires_at) > new Date()) {
+       const user = await kv.get(`user:id:${session.user_id}`);
+       if (user) {
+         return { 
+           user: { 
+             id: user.id, 
+             email: user.mobile_number, 
+             // Updated: Retrieve actual plan details from KV
+             user_metadata: { 
+                name: user.mobile_number, 
+                plan: user.plan || 'FREE',
+                plan_selected: user.plan_selected || false
+             }
+           }, 
+           error: null 
+         };
+       }
+    }
   }
 
   // Check if it's the public anon key - this shouldn't be used for auth

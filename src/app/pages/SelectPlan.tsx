@@ -5,7 +5,7 @@ import { Check, Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { PLAN_DETAILS, PricingPlan } from '../constants/pricing';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../services/supabaseClient';
+import { updateUserProfile } from '../services/auth';
 import { toast } from 'sonner';
 
 export function SelectPlan() {
@@ -22,23 +22,18 @@ export function SelectPlan() {
   }
 
   const handleSelectPlan = async (planKey: PricingPlan) => {
-    if (user?.plan === planKey) return;
+    // Only return if plan matches AND user has already explicitly selected a plan
+    if (user?.plan === planKey && user?.hasSelectedPlan) return;
     
     try {
       setIsUpdating(true);
       
-      const { error } = await supabase.auth.updateUser({
-        data: {
-          plan: planKey,
-          plan_selected: true,
-        },
+      await updateUserProfile({
+        plan: planKey,
+        plan_selected: true,
       });
 
-      if (error) throw error;
-
       toast.success(isUpgrade ? `Upgraded to ${PLAN_DETAILS[planKey].title} Plan!` : `Welcome to the ${PLAN_DETAILS[planKey].title} Plan!`);
-      // The AuthContext will pick up the change automatically via onAuthStateChange
-      // But we can force navigation to be sure
       navigate('/dashboard');
       
     } catch (error) {
@@ -133,16 +128,16 @@ export function SelectPlan() {
                 <div className="p-6 pt-0 mt-auto">
                   <Button 
                     onClick={() => handleSelectPlan(planKey)}
-                    disabled={isUpdating || isCurrent}
+                    disabled={isUpdating || (isCurrent && !!user?.hasSelectedPlan)}
                     className={`w-full ${
-                      isCurrent
+                      isCurrent && !!user?.hasSelectedPlan
                         ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                        : isPopular 
+                        : isPopular || (isCurrent && !user?.hasSelectedPlan)
                           ? 'bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white' 
                           : 'bg-[#F5F9FC] text-[#0F4C81] hover:bg-[#0F4C81]/10'
                     }`}
                   >
-                    {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : isCurrent ? 'Current Plan' : isUpgrade ? 'Upgrade' : 'Select'}
+                    {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : (isCurrent && !!user?.hasSelectedPlan) ? 'Current Plan' : (isCurrent && !user?.hasSelectedPlan) ? 'Continue' : isUpgrade ? 'Upgrade' : 'Select'}
                   </Button>
                 </div>
               </motion.div>

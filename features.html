@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Arali — Your Daily Shop, Made Simpler</title>
-    <meta name="description" content="Arali helps small retail owners manage inventory, track sales, reduce waste, and make better daily decisions with clarity." />
+    <title>Arali Features — Simple Inventory & Sales Management</title>
+    <meta name="description" content="Explore Arali’s features for inventory tracking, sales insights, waste reduction, and smarter retail management." />
     <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://www.aralimsk.com/" />
+    <link rel="canonical" href="https://www.aralimsk.com/features" />
 
     <!-- Open Graph Tags -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Arali — Your Daily Shop, Made Simpler" />
-    <meta property="og:description" content="Arali helps small retail owners manage inventory, track sales, reduce waste, and make better daily decisions with clarity." />
-    <meta property="og:url" content="https://www.aralimsk.com/" />
+    <meta property="og:title" content="Arali Features — Simple Inventory & Sales Management" />
+    <meta property="og:description" content="All the tools you need to manage inventory, track sales, and reduce waste in your retail store." />
+    <meta property="og:url" content="https://www.aralimsk.com/features" />
     <meta property="og:site_name" content="Arali" />
     <meta property="og:image" content="https://www.aralimsk.com/og-image.png" />
     <meta property="og:image:width" content="1200" />
@@ -20,8 +20,8 @@
 
     <!-- Twitter / X Card Tags -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Arali — Your Daily Shop, Made Simpler" />
-    <meta name="twitter:description" content="Arali helps small retail owners manage inventory, track sales, reduce waste, and make better daily decisions with clarity." />
+    <meta name="twitter:title" content="Arali Features — Simple Inventory & Sales Management" />
+    <meta name="twitter:description" content="Discover how Arali helps retail shop owners manage inventory, sales, and daily decisions." />
     <meta name="twitter:image" content="https://www.aralimsk.com/og-image.png" />
 
     <!-- AI & Crawler Friendly Signals -->
@@ -78,53 +78,20 @@
       }
     }
     </script>
-
-    <!-- FAQ Schema -->
+    
+    <!-- Features Schema -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "FAQPage",
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "What is Arali?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Arali is a retail management platform that helps small shop owners manage inventory, track sales, reduce waste, and make better daily decisions."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Who is Arali built for?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Arali is built for small and medium retail stores, including kirana shops, grocery stores, and local retailers."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Does Arali work on mobile?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Yes. Arali works on mobile, tablet, and desktop devices."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "How does Arali help reduce inventory waste?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Arali monitors stock levels, expiry dates, and sales trends to help shop owners take action before products expire or go out of stock."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Is Arali free to use?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Arali offers a free plan to get started, with optional paid plans for advanced features."
-          }
-        }
+      "@type": "ItemList",
+      "name": "Arali Features",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Inventory Management" },
+        { "@type": "ListItem", "position": 2, "name": "Sales Tracking" },
+        { "@type": "ListItem", "position": 3, "name": "Low Stock & Expiry Alerts" },
+        { "@type": "ListItem", "position": 4, "name": "Waste Reduction Insights" },
+        { "@type": "ListItem", "position": 5, "name": "Business Insights Dashboard" },
+        { "@type": "ListItem", "position": 6, "name": "Multi-device Access" }
       ]
     }
     </script>
@@ -143,12 +110,9 @@
       .ssr-btn { display: inline-block; background: #0F4C81; color: white; padding: 16px 32px; border-radius: 50px; text-decoration: none; font-weight: 500; font-size: 1.1rem; }
       .ssr-section { padding: 40px 0; }
       .ssr-h2 { color: #0F4C81; font-size: 2rem; margin-bottom: 20px; text-align: center; }
-      .ssr-list { text-align: left; max-width: 500px; margin: 0 auto 30px; padding: 20px; background: white; border-radius: 12px; border: 1px solid rgba(15, 76, 129, 0.1); }
-      .ssr-list li { margin-bottom: 12px; color: #082032; list-style-type: none; padding-left: 24px; position: relative; }
-      .ssr-list li:before { content: "✓"; color: #0F4C81; position: absolute; left: 0; font-weight: bold; }
-      
-      /* New FAQ Styles */
+      .ssr-list { text-align: left; max-width: 800px; margin: 0 auto 30px; padding: 20px; background: white; border-radius: 12px; border: 1px solid rgba(15, 76, 129, 0.1); }
       .ssr-list strong { display: block; margin-top: 20px; font-size: 1.1rem; color: #0F4C81; }
+      .ssr-list strong:first-child { margin-top: 0; }
       .ssr-list p { margin-bottom: 10px; color: #082032; opacity: 0.8; }
     </style>
   </head>
@@ -166,71 +130,59 @@
       </header>
 
       <main>
-        <section class="ssr-hero">
-          <h1 class="ssr-h1">Your daily shop, made simpler.</h1>
-          <p class="ssr-p">
-            Arali helps small retail owners manage inventory, track sales,
-            reduce waste, and make better daily decisions with clarity.
+        <!-- Features Section -->
+        <section class="ssr-section">
+          <h1 class="ssr-h1" style="text-align: center;">Powerful features built for daily retail operations</h1>
+
+          <p class="ssr-p" style="text-align:center;">
+            Arali gives retail shop owners the tools they need to manage inventory,
+            track sales, and make confident decisions every day.
           </p>
-          <a href="/login" class="ssr-btn">Get Started</a>
-        </section>
 
-        <section class="ssr-section">
-          <h2 class="ssr-h2">What Arali helps you do</h2>
-          <ul class="ssr-list">
-            <li>Track inventory in real time</li>
-            <li>Identify low-stock and expiry risks</li>
-            <li>Reduce waste using sales insights</li>
-            <li>Understand daily, weekly, and monthly performance</li>
-            <li>Run your shop with less stress and more control</li>
-          </ul>
-          
-          <!-- Added Internal Link -->
-          <div style="text-align:center; margin-top:24px;">
-            <a href="/features" class="ssr-btn">
-              Explore all Arali features
-            </a>
-          </div>
-        </section>
-
-        <section class="ssr-section" style="text-align:center;">
-          <a href="/login" class="ssr-btn">Get Started</a>
-        </section>
-
-        <!-- FAQ Section -->
-        <section class="ssr-section">
-          <h2 class="ssr-h2">Frequently Asked Questions</h2>
+          <p style="text-align:center; margin-bottom:24px;">
+            New to Arali? Start from the <a href="/">homepage</a> to understand how it works.
+          </p>
 
           <div class="ssr-list">
-            <strong>What is Arali?</strong>
+            <strong>Inventory Management</strong>
             <p>
-              Arali is a retail management platform that helps small shop owners
-              manage inventory, track sales, reduce waste, and make better daily decisions.
-              Learn more about <a href="/features">Arali’s core features</a>.
+              Track stock levels in real time, monitor expiry dates,
+              and avoid overstocking or shortages.
             </p>
 
-            <strong>Who is Arali built for?</strong>
+            <strong>Sales Tracking</strong>
             <p>
-              Arali is designed for small and medium retail stores, including kirana shops,
-              grocery stores, and local retailers.
+              Record daily sales automatically and understand performance
+              across products, days, and months.
             </p>
 
-            <strong>Does Arali work on mobile?</strong>
+            <strong>Low Stock & Expiry Alerts</strong>
             <p>
-              Yes. Arali works on mobile, tablet, and desktop devices.
+              Get notified before items run out or expire,
+              so you can take action at the right time.
             </p>
 
-            <strong>How does Arali help reduce inventory waste?</strong>
+            <strong>Waste Reduction Insights</strong>
             <p>
-              Arali monitors stock levels, expiry dates, and sales trends to help shop owners
-              take action before products expire or run out of stock.
+              Identify slow-moving products and receive recommendations
+              to reduce inventory waste.
             </p>
 
-            <strong>Is Arali free to use?</strong>
+            <strong>Business Insights Dashboard</strong>
             <p>
-              Arali offers a free plan to get started, with optional paid plans
-              for advanced features.
+              View key metrics like revenue, stock value,
+              and risk items in one simple dashboard.
             </p>
+
+            <strong>Works Anywhere</strong>
+            <p>
+              Use Arali on mobile, tablet, or desktop —
+              whether you are at the shop or on the move.
+            </p>
+          </div>
+
+          <div style="text-align:center; margin-top:40px;">
+            <a href="/login" class="ssr-btn">Get Started with Arali</a>
           </div>
         </section>
       </main>
