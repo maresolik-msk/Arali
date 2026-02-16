@@ -5,6 +5,11 @@ import { Link } from 'react-router';
 import { ArrowRight, CircleAlert, TrendingDown, EyeOff, ClipboardList, Check, X, Smartphone, Bell, ChartColumn, Clock } from 'lucide-react';
 import Container1 from '../../imports/Container';
 import { BlogSection } from '../components/blog/BlogSection';
+import { TrustBar } from '../components/landing/TrustBar';
+import { AppPreview } from '../components/landing/AppPreview';
+import { BeforeAfter } from '../components/landing/BeforeAfter';
+import { Testimonials } from '../components/landing/Testimonials';
+import { BentoFeatures } from '../components/landing/BentoFeatures';
 
 const imgMobileAppPreview = "https://images.unsplash.com/photo-1727782645141-2da5023c5c9e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb2JpbGUlMjBhcHAlMjBpbnRlcmZhY2UlMjByZXRhaWwlMjBtYW5hZ2VtZW50fGVufDF8fHx8MTc2ODU1MjM4OHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral";
 
@@ -105,6 +110,9 @@ export function Home() {
         </div>
       </section>
 
+      {/* Trust Bar */}
+      <TrustBar />
+
       {/* 4.2 Problem Reality Section */}
       <section className="py-24 bg-[#EBF4FA]">
         <div className="container mx-auto px-6">
@@ -143,6 +151,9 @@ export function Home() {
           </motion.div>
         </div>
       </section>
+
+      {/* App Preview - See It In Action */}
+      <AppPreview />
 
       {/* 4.3 Arali's Core Solution */}
       <section className="py-32 bg-white relative overflow-hidden">
@@ -211,6 +222,9 @@ export function Home() {
           </div>
         </div>
       </section>
+
+      {/* Before & After Comparison */}
+      <BeforeAfter />
 
       {/* 4.4 Daily Shop Life Integration */}
       <section className="py-24 bg-[#0F4C81] text-[#F5F9FC] relative overflow-hidden">
@@ -284,6 +298,9 @@ export function Home() {
         </div>
       </section>
 
+      {/* Testimonials */}
+      <Testimonials />
+
       {/* 4.6 Visibility & Footfall */}
       <section className="py-24 bg-white border-y border-[#0F4C81]/5">
         <div className="container mx-auto px-6">
@@ -342,6 +359,9 @@ export function Home() {
 
       {/* Blog Section */}
       <BlogSection />
+
+      {/* Bento Feature Grid */}
+      <BentoFeatures />
 
       {/* 4.7 Who It's For */}
       <section className="py-24 bg-[#EBF4FA]">

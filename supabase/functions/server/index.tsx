@@ -39,12 +39,31 @@ app.use(
   "/*",
   cors({
     origin: "*",
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "x-custom-auth-token"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
   }),
 );
+
+// Custom auth token extraction middleware
+// When the frontend sends a custom KV-auth token, it uses:
+//   Authorization: Bearer <publicAnonKey>    (required by Supabase Edge Functions)
+//   x-custom-auth-token: access_xxx          (the actual user token)
+// This middleware makes the custom token available to verifyAuth() via a module-level
+// variable. This is safe because each Supabase Edge Function invocation runs in its
+// own isolate, handling one request at a time.
+let _currentRequestCustomToken: string | null = null;
+
+app.use('/make-server-29b58f9a/*', async (c, next) => {
+  const customToken = c.req.header('x-custom-auth-token');
+  _currentRequestCustomToken = (customToken && customToken.startsWith('access_')) ? customToken : null;
+  try {
+    await next();
+  } finally {
+    _currentRequestCustomToken = null;
+  }
+});
 
 // Health check endpoint
 app.get("/make-server-29b58f9a/health", (c) => {
@@ -93,36 +112,84 @@ app.post("/make-server-29b58f9a/auth/otp/verify", async (c) => {
   }
 });
 
+// Refresh an expired or near-expiry KV-auth token
+app.post("/make-server-29b58f9a/auth/refresh-token", async (c) => {
+  try {
+    const { token } = await c.req.json();
+    
+    if (!token || !token.startsWith('access_')) {
+      return c.json({ error: 'Invalid token format' }, 400);
+    }
+
+    const result = await authService.refreshAuthToken(token);
+
+    if (result.error) {
+      console.warn(`[Auth] Token refresh failed: ${result.error}`);
+      return c.json({ error: result.error }, 401);
+    }
+
+    console.log(`[Auth] Token refreshed for user ${result.user.mobile_number}`);
+    return c.json({ session: result.session, user: result.user });
+  } catch (error) {
+    console.error("Error refreshing token:", error);
+    return c.json({ error: "Failed to refresh token", details: String(error) }, 500);
+  }
+});
+
 // Update User Profile (Plan Selection)
 app.put("/make-server-29b58f9a/user/profile", async (c) => {
+  let step = 'init';
   try {
-    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    step = 'verifyAuth';
+    const { user, error: authError } = await verifyAuth(c);
+    
     if (authError || !user) {
-      return c.json({ error: "Unauthorized" }, 401);
+      console.error("Profile update unauthorized:", authError);
+      return c.json({ error: authError || "Unauthorized" }, 401);
     }
     
-    const updates = await c.req.json();
-    const userId = user.id;
+    step = 'parseBody';
+    let updates;
+    try {
+        updates = await c.req.json();
+    } catch (e) {
+        return c.json({ error: "Invalid JSON body" }, 400);
+    }
 
-    // Fetch existing user from KV to ensure we don't overwrite other fields
+    step = 'checkUserId';
+    const userId = user.id;
+    if (!userId) {
+        return c.json({ error: "Invalid user ID from auth" }, 400);
+    }
+
+    step = 'fetchUserKV';
+    // Fetch existing user from KV
     const existingUser = await kv.get(`user:id:${userId}`);
     if (!existingUser) {
-      return c.json({ error: "User not found" }, 404);
+      console.error(`User not found in KV for ID: ${userId}`);
+      return c.json({ error: "User not found in database" }, 404);
     }
     
-    // Merge updates
+    step = 'mergeUpdates';
+    // Merge updates safely
     const updatedUser = {
       ...existingUser,
-      ...updates,
-      // Ensure protected fields aren't overwritten by client if needed, 
-      // but here we trust the schema for now or filter:
       plan: updates.plan || existingUser.plan,
-      plan_selected: updates.plan_selected !== undefined ? updates.plan_selected : existingUser.plan_selected
+      plan_selected: updates.plan_selected !== undefined ? updates.plan_selected : existingUser.plan_selected,
+      updated_at: new Date().toISOString()
     };
+    
+    // Only update name if provided
+    if (updates.name) {
+        updatedUser.name = updates.name;
+    }
 
+    step = 'saveUserKV';
     // Update both indices
     await kv.set(`user:id:${userId}`, updatedUser);
+    
     if (updatedUser.mobile_number) {
+       step = 'saveMobileKV';
        await kv.set(`user:mobile:${updatedUser.mobile_number}`, updatedUser);
     }
     
@@ -130,8 +197,46 @@ app.put("/make-server-29b58f9a/user/profile", async (c) => {
     
     return c.json({ success: true, user: updatedUser });
   } catch (error) {
-    console.error("Error updating profile:", error);
-    return c.json({ error: "Failed to update profile", details: String(error) }, 500);
+    console.error(`Error updating profile at step ${step}:`, error);
+    // Return the actual error message to help debugging
+    return c.json({ 
+        error: "Failed to update profile", 
+        details: error instanceof Error ? error.message : String(error),
+        step: step 
+    }, 500);
+  }
+});
+
+// Get User Profile
+app.get("/make-server-29b58f9a/user/profile", async (c) => {
+  try {
+    const { user, error } = await verifyAuth(c);
+    
+    if (error || !user) {
+      return c.json({ error: error || "Unauthorized" }, 401);
+    }
+    
+    // For custom auth users (ID is phone number), fetch from KV
+    // For Supabase users (UUID), we might also have KV data
+    const kvUser = await kv.get(`user:id:${user.id}`);
+    
+    if (kvUser) {
+        return c.json({ user: kvUser });
+    }
+    
+    // Fallback for Supabase users who might not be in KV yet (shouldn't happen for profile flow)
+    return c.json({ 
+        user: {
+            id: user.id,
+            email: user.email,
+            name: user.user_metadata?.name,
+            plan: user.user_metadata?.plan || 'FREE',
+            plan_selected: user.user_metadata?.plan_selected
+        } 
+    });
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    return c.json({ error: "Failed to fetch profile" }, 500);
   }
 });
 
@@ -232,27 +337,51 @@ app.post("/make-server-29b58f9a/auth/init-demo", async (c) => {
 });
 
 // Verify authentication token (middleware helper)
-async function verifyAuth(authHeader: string | null) {
-  if (!authHeader) {
-    return { user: null, error: "No authorization header" };
+// Accepts either: (1) Hono context object `c`, or (2) explicit authHeader + customTokenHeader
+async function verifyAuth(authHeaderOrContext: any, customTokenHeader: string | null = null) {
+  let authHeader: string | null = null;
+  let customToken: string | null = customTokenHeader;
+
+  // Detect if a Hono context was passed (has req.header method)
+  if (authHeaderOrContext && typeof authHeaderOrContext === 'object' && authHeaderOrContext.req && typeof authHeaderOrContext.req.header === 'function') {
+    authHeader = authHeaderOrContext.req.header('Authorization') || null;
+    customToken = authHeaderOrContext.req.header('x-custom-auth-token') || null;
+  } else {
+    // Legacy: authHeader was passed directly as a string
+    authHeader = authHeaderOrContext;
   }
 
-  const token = authHeader.split(' ')[1];
+  let token = customToken;
+
+  // If no custom token, try extracting from Authorization header
+  if (!token && authHeader) {
+    const parts = authHeader.split(' ');
+    if (parts.length === 2) {
+      token = parts[1];
+    }
+  }
+
   if (!token) {
-    return { user: null, error: "Invalid authorization header" };
+    return { user: null, error: "No authorization token found" };
   }
 
-  // Check Custom OTP Auth Token
+  // Check Custom OTP Auth Token (starts with access_)
   if (token.startsWith('access_')) {
     const session = await kv.get(`auth:token:${token}`);
     if (session && new Date(session.expires_at) > new Date()) {
        const user = await kv.get(`user:id:${session.user_id}`);
        if (user) {
+         // Sliding-window renewal: if token expires within 1 day, extend by 7 days
+         const timeRemaining = new Date(session.expires_at).getTime() - Date.now();
+         if (timeRemaining < authService.TOKEN_REFRESH_THRESHOLD_MS) {
+           authService.extendTokenExpiry(token).catch(err =>
+             console.warn('[Auth] Failed to extend token expiry:', err)
+           );
+         }
          return { 
            user: { 
              id: user.id, 
              email: user.mobile_number, 
-             // Updated: Retrieve actual plan details from KV
              user_metadata: { 
                 name: user.mobile_number, 
                 plan: user.plan || 'FREE',
@@ -262,13 +391,58 @@ async function verifyAuth(authHeader: string | null) {
            error: null 
          };
        }
+    } else if (session) {
+        // Token exists but expired — downgrade to info since this is a routine
+        // event that triggers automatic client-side refresh via /auth/refresh-token
+        const expiredAgo = Math.round((Date.now() - new Date(session.expires_at).getTime()) / 60000);
+        console.log(`[Auth] Custom token expired ${expiredAgo}m ago for user ${session.user_id} — client should refresh`);
+        return { user: null, error: "Session expired" };
+    } else {
+        return { user: null, error: "Invalid custom token — session not found" };
     }
   }
 
   // Check if it's the public anon key - this shouldn't be used for auth
-  // but we need to handle it gracefully
+  // but we need to handle it gracefully if it was passed in Authorization header
+  // while the real token was missing
   const publicAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
   if (token === publicAnonKey) {
+    // Before returning error, check if the middleware captured a custom auth token.
+    // This handles legacy call sites that only pass c.req.header('Authorization')
+    // while the actual custom token was sent in the x-custom-auth-token header.
+    if (_currentRequestCustomToken && _currentRequestCustomToken.startsWith('access_')) {
+      const customSession = await kv.get(`auth:token:${_currentRequestCustomToken}`);
+      if (customSession && new Date(customSession.expires_at) > new Date()) {
+        const customUser = await kv.get(`user:id:${customSession.user_id}`);
+        if (customUser) {
+          // Sliding-window renewal for fallback path too
+          const timeRemaining = new Date(customSession.expires_at).getTime() - Date.now();
+          if (timeRemaining < authService.TOKEN_REFRESH_THRESHOLD_MS) {
+            authService.extendTokenExpiry(_currentRequestCustomToken).catch(err =>
+              console.warn('[Auth] Failed to extend token expiry (fallback):', err)
+            );
+          }
+          return {
+            user: {
+              id: customUser.id,
+              email: customUser.mobile_number,
+              user_metadata: {
+                name: customUser.mobile_number,
+                plan: customUser.plan || 'FREE',
+                plan_selected: customUser.plan_selected || false
+              }
+            },
+            error: null
+          };
+        }
+      }
+      if (customSession) {
+        const expiredAgo = Math.round((Date.now() - new Date(customSession.expires_at).getTime()) / 60000);
+        console.log(`[Auth] Custom token (fallback) expired ${expiredAgo}m ago for user ${customSession.user_id} — client should refresh`);
+        return { user: null, error: "Session expired" };
+      }
+      return { user: null, error: "Invalid custom token — session not found" };
+    }
     return { user: null, error: "Invalid JWT - please sign in to continue" };
   }
 
@@ -278,7 +452,8 @@ async function verifyAuth(authHeader: string | null) {
     // Only log if it's not a token expiration error or "Auth session missing" (which can happen with invalid tokens)
     const isTokenExpired = error?.message?.includes('expired') || 
                            error?.message?.includes('JWT') || 
-                           error?.message?.includes('session missing');
+                           error?.message?.includes('session missing') ||
+                           error?.message?.includes('missing sub claim');
                            
     if (!isTokenExpired) {
       console.error("Auth verification error:", error?.message || "User not found");
@@ -515,6 +690,358 @@ app.post("/make-server-29b58f9a/products/:id/restock", async (c) => {
   } catch (error) {
     console.error("Error restocking product:", error);
     return c.json({ error: "Failed to restock product", details: String(error) }, 500);
+  }
+});
+
+// ========================================
+// VARIANT SYSTEM ENDPOINTS
+// ========================================
+
+// Base-unit conversion helper
+function toBaseUnit(value: number, unitLabel: string): number {
+  switch (unitLabel.toLowerCase()) {
+    case 'kg': return value * 1000;
+    case 'g': case 'grams': case 'gram': return value;
+    case 'l': case 'litre': case 'liter': case 'litres': case 'liters': return value * 1000;
+    case 'ml': case 'millilitre': case 'milliliter': return value;
+    case 'pcs': case 'piece': case 'pieces': case 'unit': case 'units': return value;
+    case 'dozen': return value * 12;
+    default: return value;
+  }
+}
+
+function fromBaseUnit(value: number, unitLabel: string): number {
+  switch (unitLabel.toLowerCase()) {
+    case 'kg': return value / 1000;
+    case 'g': case 'grams': case 'gram': return value;
+    case 'l': case 'litre': case 'liter': case 'litres': case 'liters': return value / 1000;
+    case 'ml': case 'millilitre': case 'milliliter': return value;
+    case 'pcs': case 'piece': case 'pieces': case 'unit': case 'units': return value;
+    case 'dozen': return value / 12;
+    default: return value;
+  }
+}
+
+function getBaseUnitLabel(unitType: string): string {
+  switch (unitType) {
+    case 'weight': return 'g';
+    case 'volume': return 'ml';
+    case 'count': return 'pcs';
+    default: return 'pcs';
+  }
+}
+
+// Auto-migrate product: add default variant from existing data
+function autoMigrateProduct(product: any): any {
+  // Only skip if the product ACTUALLY has variant entries — don't trust hasVariants flag alone
+  if (product.variants && Array.isArray(product.variants) && product.variants.length > 0) {
+    return product;
+  }
+  const defaultVariant = {
+    id: `var-default-${product.id}`,
+    variantName: `${product.name} - Standard`,
+    unitType: 'count',
+    packSizeInBaseUnit: 1,
+    displayUnit: 'pcs',
+    sellingPrice: Number(product.sellingPrice) || Number(product.price) || 0,
+    mrp: Number(product.sellingPrice) || Number(product.price) || 0,
+    costPrice: Number(product.costPrice) || 0,
+    barcode: null,
+    isLoose: false,
+    isActive: true,
+    stockInBaseUnit: Number(product.stock) || 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  product.variants = [defaultVariant];
+  product.baseUnit = 'pcs';
+  product.hasVariants = true;
+  return product;
+}
+
+// Sync variant stock to product.stock for backward compat
+function syncProductStock(product: any) {
+  if (!product.variants || product.variants.length === 0) return;
+  const activeVariants = product.variants.filter((v: any) => v.isActive !== false);
+  let totalPacks = 0;
+  for (const v of activeVariants) {
+    const packs = Math.floor((v.stockInBaseUnit || 0) / (v.packSizeInBaseUnit || 1));
+    totalPacks += packs;
+  }
+  product.stock = totalPacks;
+}
+
+// GET all variants for a product
+app.get("/make-server-29b58f9a/products/:id/variants", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+    const id = parseInt(c.req.param('id'));
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const prodIndex = productsList.findIndex((p: any) => p.id === id);
+    if (prodIndex === -1) return c.json({ error: "Product not found" }, 404);
+    const hadVariantsBefore = productsList[prodIndex].variants && Array.isArray(productsList[prodIndex].variants) && productsList[prodIndex].variants.length > 0;
+    autoMigrateProduct(productsList[prodIndex]);
+    if (!hadVariantsBefore) {
+      // Migration happened — persist it
+      await kv.set(getUserKey(user.id, 'products'), productsList);
+      console.log(`Auto-migrated product ${id} to variant system on GET. Variants: ${JSON.stringify((productsList[prodIndex].variants || []).map((v: any) => v.id))}`);
+    }
+    const product = productsList[prodIndex];
+    return c.json({
+      variants: (product.variants || []).filter((v: any) => v.isActive !== false),
+      baseUnit: product.baseUnit || 'pcs'
+    });
+  } catch (error) {
+    console.error("Error fetching variants:", error);
+    return c.json({ error: "Failed to fetch variants", details: String(error) }, 500);
+  }
+});
+
+// ADD variant to product
+app.post("/make-server-29b58f9a/products/:id/variants", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+    const id = parseInt(c.req.param('id'));
+    const variantData = await c.req.json();
+    if (!variantData.variantName || !variantData.unitType || variantData.sellingPrice === undefined) {
+      return c.json({ error: "Missing required fields: variantName, unitType, sellingPrice" }, 400);
+    }
+    if (!variantData.isLoose && (!variantData.packSizeInBaseUnit || variantData.packSizeInBaseUnit <= 0)) {
+      return c.json({ error: "packSizeInBaseUnit must be > 0 for non-loose variants" }, 400);
+    }
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const index = productsList.findIndex((p: any) => p.id === id);
+    if (index === -1) return c.json({ error: "Product not found" }, 404);
+    autoMigrateProduct(productsList[index]);
+    const newVariant = {
+      id: `var-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      variantName: variantData.variantName,
+      unitType: variantData.unitType,
+      packSizeInBaseUnit: variantData.isLoose ? 1 : Number(variantData.packSizeInBaseUnit),
+      displayUnit: variantData.displayUnit || getBaseUnitLabel(variantData.unitType),
+      sellingPrice: Number(variantData.sellingPrice),
+      mrp: Number(variantData.mrp || variantData.sellingPrice),
+      costPrice: Number(variantData.costPrice || 0),
+      barcode: variantData.barcode || null,
+      isLoose: !!variantData.isLoose,
+      isActive: true,
+      stockInBaseUnit: Number(variantData.stockInBaseUnit || 0),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    if (!productsList[index].variants) productsList[index].variants = [];
+    productsList[index].variants.push(newVariant);
+    productsList[index].hasVariants = true;
+    if (variantData.baseUnit) productsList[index].baseUnit = variantData.baseUnit;
+    productsList[index].updatedAt = new Date();
+    syncProductStock(productsList[index]);
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    console.log(`Variant "${newVariant.variantName}" added to product ${id} for user ${user.email}`);
+    return c.json({ variant: newVariant, product: productsList[index] });
+  } catch (error) {
+    console.error("Error adding variant:", error);
+    return c.json({ error: "Failed to add variant", details: String(error) }, 500);
+  }
+});
+
+// UPDATE variant
+app.put("/make-server-29b58f9a/products/:id/variants/:variantId", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+    const id = parseInt(c.req.param('id'));
+    const variantId = c.req.param('variantId');
+    const updates = await c.req.json();
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const prodIndex = productsList.findIndex((p: any) => p.id === id);
+    if (prodIndex === -1) {
+      console.error(`[PUT variant] Product not found. id=${id} (type: ${typeof id}), product IDs in list: ${productsList.slice(0, 10).map((p: any) => `${p.id}(${typeof p.id})`).join(', ')}`);
+      return c.json({ error: "Product not found" }, 404);
+    }
+    // Auto-migrate if product doesn't have variants yet
+    autoMigrateProduct(productsList[prodIndex]);
+    const existingVariantIds = (productsList[prodIndex].variants || []).map((v: any) => v.id);
+    const varIndex = (productsList[prodIndex].variants || []).findIndex((v: any) => v.id === variantId);
+    if (varIndex === -1) {
+      console.error(`[PUT variant] Variant not found. variantId="${variantId}", existing variant IDs: ${JSON.stringify(existingVariantIds)}, hasVariants=${productsList[prodIndex].hasVariants}, variants length=${(productsList[prodIndex].variants || []).length}`);
+      return c.json({ error: "Variant not found", debug: { requestedVariantId: variantId, existingVariantIds, hasVariants: productsList[prodIndex].hasVariants } }, 404);
+    }
+    const { packSizeInBaseUnit: _ignored, id: _id, ...safeUpdates } = updates;
+    productsList[prodIndex].variants[varIndex] = {
+      ...productsList[prodIndex].variants[varIndex],
+      ...safeUpdates,
+      updatedAt: new Date().toISOString(),
+    };
+    syncProductStock(productsList[prodIndex]);
+    productsList[prodIndex].updatedAt = new Date();
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    console.log(`Variant ${variantId} updated for product ${id}`);
+    return c.json({ variant: productsList[prodIndex].variants[varIndex], product: productsList[prodIndex] });
+  } catch (error) {
+    console.error("Error updating variant:", error);
+    return c.json({ error: "Failed to update variant", details: String(error) }, 500);
+  }
+});
+
+// SOFT-DELETE variant
+app.delete("/make-server-29b58f9a/products/:id/variants/:variantId", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+    const id = parseInt(c.req.param('id'));
+    const variantId = c.req.param('variantId');
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const prodIndex = productsList.findIndex((p: any) => p.id === id);
+    if (prodIndex === -1) return c.json({ error: "Product not found" }, 404);
+    // Auto-migrate if product doesn't have variants yet
+    autoMigrateProduct(productsList[prodIndex]);
+    const varIndex = (productsList[prodIndex].variants || []).findIndex((v: any) => v.id === variantId);
+    if (varIndex === -1) return c.json({ error: "Variant not found" }, 404);
+    productsList[prodIndex].variants[varIndex].isActive = false;
+    productsList[prodIndex].variants[varIndex].updatedAt = new Date().toISOString();
+    syncProductStock(productsList[prodIndex]);
+    productsList[prodIndex].updatedAt = new Date();
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    console.log(`Variant ${variantId} soft-deleted for product ${id}`);
+    return c.json({ success: true, product: productsList[prodIndex] });
+  } catch (error) {
+    console.error("Error deleting variant:", error);
+    return c.json({ error: "Failed to delete variant", details: String(error) }, 500);
+  }
+});
+
+// RESTOCK variant
+app.post("/make-server-29b58f9a/products/:id/variants/:variantId/restock", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+    const id = parseInt(c.req.param('id'));
+    const variantId = c.req.param('variantId');
+    const { quantity, unitLabel } = await c.req.json();
+    if (!quantity || quantity <= 0) return c.json({ error: "Invalid quantity" }, 400);
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const prodIndex = productsList.findIndex((p: any) => p.id === id);
+    if (prodIndex === -1) return c.json({ error: "Product not found" }, 404);
+    // Auto-migrate if product doesn't have variants yet
+    autoMigrateProduct(productsList[prodIndex]);
+    const varIndex = (productsList[prodIndex].variants || []).findIndex((v: any) => v.id === variantId);
+    if (varIndex === -1) return c.json({ error: "Variant not found" }, 404);
+    const variant = productsList[prodIndex].variants[varIndex];
+    const baseQty = unitLabel ? toBaseUnit(Number(quantity), unitLabel) : Number(quantity) * variant.packSizeInBaseUnit;
+    variant.stockInBaseUnit = (variant.stockInBaseUnit || 0) + baseQty;
+    variant.updatedAt = new Date().toISOString();
+    syncProductStock(productsList[prodIndex]);
+    productsList[prodIndex].updatedAt = new Date();
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    movementsList.push({
+      id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      productId: id,
+      variantId: variantId,
+      productName: `${productsList[prodIndex].name} (${variant.variantName})`,
+      type: 'restock',
+      quantity: baseQty,
+      reason: `Variant Restock (${unitLabel || getBaseUnitLabel(variant.unitType)})`,
+      date: new Date().toISOString()
+    });
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+    console.log(`Variant ${variantId} restocked: +${baseQty} base units for product ${id}`);
+    return c.json({ variant, product: productsList[prodIndex] });
+  } catch (error) {
+    console.error("Error restocking variant:", error);
+    return c.json({ error: "Failed to restock variant", details: String(error) }, 500);
+  }
+});
+
+// SELL from variant
+app.post("/make-server-29b58f9a/products/:id/variants/:variantId/sell", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+    const id = parseInt(c.req.param('id'));
+    const variantId = c.req.param('variantId');
+    const { quantity, looseQuantityInBaseUnit } = await c.req.json();
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const prodIndex = productsList.findIndex((p: any) => p.id === id);
+    if (prodIndex === -1) return c.json({ error: "Product not found" }, 404);
+    // Auto-migrate if product doesn't have variants yet
+    autoMigrateProduct(productsList[prodIndex]);
+    const varIndex = (productsList[prodIndex].variants || []).findIndex((v: any) => v.id === variantId);
+    if (varIndex === -1) return c.json({ error: "Variant not found" }, 404);
+    const variant = productsList[prodIndex].variants[varIndex];
+    let deductBaseUnits: number;
+    let revenue: number;
+    if (variant.isLoose && looseQuantityInBaseUnit) {
+      deductBaseUnits = Number(looseQuantityInBaseUnit);
+      const pricePerBaseUnit = variant.sellingPrice / (variant.packSizeInBaseUnit || 1);
+      revenue = deductBaseUnits * pricePerBaseUnit;
+    } else {
+      const qty = Number(quantity) || 1;
+      deductBaseUnits = qty * variant.packSizeInBaseUnit;
+      revenue = qty * variant.sellingPrice;
+    }
+    if ((variant.stockInBaseUnit || 0) < deductBaseUnits) {
+      return c.json({
+        error: `Insufficient stock. Available: ${variant.stockInBaseUnit} ${getBaseUnitLabel(variant.unitType)}, trying to sell: ${deductBaseUnits}`
+      }, 400);
+    }
+    variant.stockInBaseUnit = (variant.stockInBaseUnit || 0) - deductBaseUnits;
+    variant.updatedAt = new Date().toISOString();
+    const product = productsList[prodIndex];
+    product.unitsSold = (product.unitsSold || 0) + (Number(quantity) || 1);
+    product.revenue = (product.revenue || 0) + revenue;
+    syncProductStock(product);
+    product.updatedAt = new Date();
+    const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+    const movementsList = Array.isArray(movements) ? movements : [];
+    movementsList.push({
+      id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      productId: id,
+      variantId: variantId,
+      productName: `${product.name} (${variant.variantName})`,
+      type: 'sale',
+      quantity: -deductBaseUnits,
+      reason: variant.isLoose ? `Loose Sale (${deductBaseUnits} ${getBaseUnitLabel(variant.unitType)})` : `Pack Sale x${quantity || 1}`,
+      date: new Date().toISOString()
+    });
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+    console.log(`Variant sale: -${deductBaseUnits} base units from product ${id}, variant ${variantId}`);
+    return c.json({ variant, product, revenue });
+  } catch (error) {
+    console.error("Error processing variant sale:", error);
+    return c.json({ error: "Failed to process variant sale", details: String(error) }, 500);
+  }
+});
+
+// MIGRATE existing product to variant system
+app.post("/make-server-29b58f9a/products/:id/migrate-variants", async (c) => {
+  try {
+    const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
+    if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
+    const id = parseInt(c.req.param('id'));
+    const { baseUnit } = await c.req.json();
+    const products = await kv.get(getUserKey(user.id, 'products'));
+    const productsList = Array.isArray(products) ? products : [];
+    const prodIndex = productsList.findIndex((p: any) => p.id === id);
+    if (prodIndex === -1) return c.json({ error: "Product not found" }, 404);
+    if (baseUnit) productsList[prodIndex].baseUnit = baseUnit;
+    autoMigrateProduct(productsList[prodIndex]);
+    await kv.set(getUserKey(user.id, 'products'), productsList);
+    console.log(`Product ${id} migrated to variant system`);
+    return c.json({ product: productsList[prodIndex] });
+  } catch (error) {
+    console.error("Error migrating product:", error);
+    return c.json({ error: "Failed to migrate product", details: String(error) }, 500);
   }
 });
 
@@ -2827,6 +3354,8 @@ app.post("/make-server-29b58f9a/purchases", async (c) => {
     const productsList = Array.isArray(products) ? products : [];
     let inventoryUpdated = false;
 
+    console.log(`[Purchase] Processing ${purchase.items?.length || 0} items. Products in inventory: ${productsList.length}`);
+
     if (purchase.items && Array.isArray(purchase.items)) {
         purchase.items.forEach((item: any) => {
             if (item.productId) {
@@ -2835,30 +3364,85 @@ app.post("/make-server-29b58f9a/purchases", async (c) => {
                 
                 if (productIndex !== -1) {
                     const product = productsList[productIndex];
-                    const currentStock = Number(product.stock) || 0;
-                    const currentCost = Number(product.costPrice) || 0;
-                    
                     const newQty = Number(item.quantity) || 0;
                     const newCost = Number(item.costPrice) || 0;
+
+                    // ── Variant-aware restock ──
+                    if (item.variantId && product.variants && Array.isArray(product.variants)) {
+                        const varIndex = product.variants.findIndex((v: any) => v.id === item.variantId);
+                        if (varIndex !== -1) {
+                            const variant = product.variants[varIndex];
+                            const baseQtyToAdd = Number(item.restockInBaseUnit) || (newQty * (variant.packSizeInBaseUnit || 1));
+                            variant.stockInBaseUnit = (variant.stockInBaseUnit || 0) + baseQtyToAdd;
+                            if (newCost > 0) {
+                                variant.costPrice = newCost;
+                            }
+                            variant.updatedAt = new Date().toISOString();
+                            product.variants[varIndex] = variant;
+                            syncProductStock(product);
+                            console.log(`[Purchase] Variant "${variant.variantName}" restocked for "${product.name}": +${baseQtyToAdd} base units (variantId=${item.variantId})`);
+                        } else {
+                            console.warn(`[Purchase] Variant ${item.variantId} NOT found in product "${product.name}" — falling back to legacy stock.`);
+                            product.stock = (Number(product.stock) || 0) + newQty;
+                        }
+                    } else {
+                        // ── Legacy (non-variant) stock update ──
+                        const currentStock = Number(product.stock) || 0;
+                        const currentCost = Number(product.costPrice) || 0;
+                        let avgCost = currentCost;
+                        if (currentStock + newQty > 0) {
+                             avgCost = ((currentStock * currentCost) + (newQty * newCost)) / (currentStock + newQty);
+                        }
+                        product.stock = currentStock + newQty;
+                        product.costPrice = parseFloat(avgCost.toFixed(2));
+                    }
+
+                    productsList[productIndex].updatedAt = new Date().toISOString();
                     
-                    // WAC Calculation
-                    let avgCost = currentCost;
-                    if (currentStock + newQty > 0) {
-                         avgCost = ((currentStock * currentCost) + (newQty * newCost)) / (currentStock + newQty);
+                    if (item.expiryDate) {
+                      productsList[productIndex].expiryDate = item.expiryDate;
                     }
                     
-                    productsList[productIndex].stock = currentStock + newQty;
-                    productsList[productIndex].costPrice = parseFloat(avgCost.toFixed(2));
-                    productsList[productIndex].updatedAt = new Date().toISOString();
                     inventoryUpdated = true;
                     
-                    console.log(`Updated stock for ${product.name}: ${currentStock} -> ${productsList[productIndex].stock}`);
+                    console.log(`[Purchase] Stock updated for "${product.name}" (id=${product.id}): qty=${newQty}, variant=${item.variantId || 'none'}${item.expiryDate ? `, expiry=${item.expiryDate}` : ''}`);
+                } else {
+                    console.warn(`[Purchase] Product NOT found for productId=${item.productId} ("${item.productName}"). Available product IDs: [${productsList.slice(0, 10).map((p: any) => p.id).join(', ')}]`);
                 }
+            } else {
+                console.warn(`[Purchase] Item "${item.productName}" has no productId — skipping stock update.`);
             }
         });
-        
+
+        // Record inventory movements for variant restocks
         if (inventoryUpdated) {
+            const timestamp = new Date().toISOString();
+            const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+            const movementsList = Array.isArray(movements) ? movements : [];
+            purchase.items.forEach((item: any) => {
+                if (item.productId && item.variantId) {
+                    const product = productsList.find((p: any) => String(p.id) === String(item.productId));
+                    const variant = product?.variants?.find((v: any) => v.id === item.variantId);
+                    if (product && variant) {
+                        const baseQty = Number(item.restockInBaseUnit) || (Number(item.quantity) * (variant.packSizeInBaseUnit || 1));
+                        movementsList.push({
+                            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                            productId: item.productId,
+                            variantId: item.variantId,
+                            productName: `${product.name} (${variant.variantName})`,
+                            type: 'restock',
+                            quantity: baseQty,
+                            reason: 'Smart Notepad Purchase (Variant)',
+                            date: timestamp
+                        });
+                    }
+                }
+            });
+            await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
             await kv.set(getUserKey(user.id, 'products'), productsList);
+            console.log(`[Purchase] Inventory saved. ${productsList.length} products for user ${user.email}`);
+        } else {
+            console.warn(`[Purchase] No inventory updates for purchase ${purchase.id}. No matching products found.`);
         }
     }
     
@@ -3152,51 +3736,152 @@ app.post("/make-server-29b58f9a/express/config", async (c) => {
   }
 });
 
-// Record Express Sale (Single Tap)
+// Record Express Sale (Single Tap) — supports both legacy and variant-based sales
 app.post("/make-server-29b58f9a/express/sale", async (c) => {
   try {
     const { user, error: authError } = await verifyAuth(c.req.header('Authorization'));
     if (authError || !user) return c.json({ error: "Unauthorized" }, 401);
 
-    const { productId, quantity } = await c.req.json();
+    const { productId, quantity, variantId, looseQuantityInBaseUnit } = await c.req.json();
     const qty = Number(quantity) || 1;
 
     // 1. Fetch Data
     const products = await kv.get(getUserKey(user.id, 'products'));
     const productsList = Array.isArray(products) ? products : [];
-    
-    // Fetch Orders to record revenue
+
     const orders = await kv.get(getUserKey(user.id, 'orders'));
     const ordersList = Array.isArray(orders) ? orders : [];
-    
+
     const index = productsList.findIndex((p: any) => p.id === productId);
     if (index === -1) return c.json({ error: "Product not found" }, 404);
-    
+
     const product = productsList[index];
 
-    // 2. Update Inventory (Non-blocking, optimistic in UI, but enforced here)
-    // Note: We allow negative stock in Express Mode to prevent blocking sales
+    // ── Variant-based express sale ──
+    if (variantId) {
+      autoMigrateProduct(product);
+      const varIndex = (product.variants || []).findIndex((v: any) => v.id === variantId);
+      if (varIndex === -1) return c.json({ error: "Variant not found" }, 404);
+      const variant = product.variants[varIndex];
+
+      let deductBaseUnits: number;
+      let revenue: number;
+      let saleName: string;
+
+      if (variant.isLoose && looseQuantityInBaseUnit) {
+        deductBaseUnits = Number(looseQuantityInBaseUnit);
+        const pricePerBaseUnit = variant.sellingPrice / (variant.packSizeInBaseUnit || 1);
+        revenue = deductBaseUnits * pricePerBaseUnit;
+        const unitLabel = variant.unitType === 'weight'
+          ? (deductBaseUnits >= 1000 ? `${(deductBaseUnits / 1000).toFixed(2)} kg` : `${deductBaseUnits} g`)
+          : variant.unitType === 'volume'
+            ? (deductBaseUnits >= 1000 ? `${(deductBaseUnits / 1000).toFixed(2)} L` : `${deductBaseUnits} ml`)
+            : `${deductBaseUnits} pcs`;
+        saleName = `${product.name} (${variant.variantName} - ${unitLabel})`;
+      } else {
+        deductBaseUnits = qty * variant.packSizeInBaseUnit;
+        revenue = qty * variant.sellingPrice;
+        saleName = `${product.name} (${variant.variantName})`;
+      }
+
+      if ((variant.stockInBaseUnit || 0) < deductBaseUnits) {
+        return c.json({ error: `Insufficient stock for variant. Available: ${variant.stockInBaseUnit} ${getBaseUnitLabel(variant.unitType)}`, outOfStock: true }, 400);
+      }
+
+      variant.stockInBaseUnit = (variant.stockInBaseUnit || 0) - deductBaseUnits;
+      variant.updatedAt = new Date().toISOString();
+      product.unitsSold = (Number(product.unitsSold) || 0) + qty;
+      product.revenue = (Number(product.revenue) || 0) + revenue;
+      syncProductStock(product);
+      product.updatedAt = new Date();
+
+      const transactionId = `tx-exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const timestamp = new Date().toISOString();
+
+      const expressSales = await kv.get(getUserKey(user.id, 'express_sales')) || [];
+      const expressSalesList = Array.isArray(expressSales) ? expressSales : [];
+      expressSalesList.push({
+        id: transactionId,
+        productId,
+        variantId,
+        quantity: qty,
+        looseQuantityInBaseUnit: looseQuantityInBaseUnit || null,
+        timestamp,
+        synced: true
+      });
+
+      ordersList.push({
+        id: transactionId,
+        customerName: "Walk-in (Express)",
+        items: [{
+          productId: product.id,
+          productName: saleName,
+          quantity: qty,
+          price: revenue / qty,
+          unit: variant.displayUnit || 'pcs',
+          variantId: variant.id,
+          variantName: variant.variantName,
+          ...(looseQuantityInBaseUnit ? { looseQuantityInBaseUnit } : {}),
+        }],
+        totalAmount: revenue,
+        status: 'completed',
+        paymentStatus: 'paid',
+        paymentMethod: 'cash',
+        date: timestamp,
+        createdAt: timestamp,
+        type: 'express'
+      });
+
+      const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
+      const movementsList = Array.isArray(movements) ? movements : [];
+      movementsList.push({
+        id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        transactionId,
+        productId,
+        variantId,
+        productName: saleName,
+        type: 'sale',
+        quantity: -deductBaseUnits,
+        reason: variant.isLoose ? `Express Loose Sale (${deductBaseUnits} ${getBaseUnitLabel(variant.unitType)})` : `Express Pack Sale x${qty}`,
+        date: timestamp
+      });
+
+      await kv.set(getUserKey(user.id, 'products'), productsList);
+      await kv.set(getUserKey(user.id, 'express_sales'), expressSalesList);
+      await kv.set(getUserKey(user.id, 'orders'), ordersList);
+      await kv.set(getUserKey(user.id, 'inventory_movements'), movementsList);
+
+      console.log(`Express variant sale: -${deductBaseUnits} base units from product ${productId}, variant ${variantId}`);
+      return c.json({ success: true, transactionId, newStock: product.stock, variant, product });
+    }
+
+    // ── Legacy non-variant express sale ──
+    if (product.stock <= 0) {
+      return c.json({ error: "Out of stock", outOfStock: true }, 400);
+    }
+    if (product.stock < qty) {
+      return c.json({ error: `Insufficient stock. Only ${product.stock} left.`, outOfStock: true }, 400);
+    }
+
     product.stock -= qty;
     product.unitsSold = (Number(product.unitsSold) || 0) + qty;
     product.revenue = (Number(product.revenue) || 0) + (qty * product.price);
     product.updatedAt = new Date();
 
-    // 3. Log Sale
     const transactionId = `tx-exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     const timestamp = new Date().toISOString();
 
     const expressSales = await kv.get(getUserKey(user.id, 'express_sales')) || [];
     const expressSalesList = Array.isArray(expressSales) ? expressSales : [];
-    
+
     expressSalesList.push({
       id: transactionId,
       productId,
       quantity: qty,
       timestamp,
-      synced: true // Since we updated stock immediately
+      synced: true
     });
-    
-    // Create formal Order record for Revenue Reporting
+
     ordersList.push({
       id: transactionId,
       customerName: "Walk-in (Express)",
@@ -3204,7 +3889,7 @@ app.post("/make-server-29b58f9a/express/sale", async (c) => {
         productId: product.id,
         productName: product.name,
         quantity: qty,
-        price: product.price, // Selling price
+        price: product.price,
         unit: product.unit || 'pcs'
       }],
       totalAmount: qty * product.price,
@@ -3216,10 +3901,9 @@ app.post("/make-server-29b58f9a/express/sale", async (c) => {
       type: 'express'
     });
 
-    // 4. Record Movement
     const movements = await kv.get(getUserKey(user.id, 'inventory_movements')) || [];
     const movementsList = Array.isArray(movements) ? movements : [];
-    
+
     movementsList.push({
         id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         transactionId: transactionId,
@@ -3231,7 +3915,6 @@ app.post("/make-server-29b58f9a/express/sale", async (c) => {
         date: timestamp
     });
 
-    // 5. Save All
     await kv.set(getUserKey(user.id, 'products'), productsList);
     await kv.set(getUserKey(user.id, 'express_sales'), expressSalesList);
     await kv.set(getUserKey(user.id, 'orders'), ordersList);

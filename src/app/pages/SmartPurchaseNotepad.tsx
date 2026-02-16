@@ -19,21 +19,53 @@ import {
   AlertTriangle,
   Info,
   Edit2,
-  Save
+  Save,
+  Package,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { useNavigate } from 'react-router';
 import { aiApi, productsApi, purchasesApi, vendorsApi } from '../services/api';
-import type { Product, Vendor, PurchaseItem, Purchase } from '../data/dashboardData';
+import type { Product, ProductVariant, Vendor, PurchaseItem, Purchase } from '../data/dashboardData';
 import { QuickAddProductModal } from '../components/QuickAddProductModal';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
+import { cn } from '../components/ui/utils';
 
 interface PurchaseItemUI extends PurchaseItem {
   id: string; // temp id for UI
   confidence: number;
   originalText?: string;
   isNew?: boolean;
+}
+
+// ── Variant helpers ──
+
+function getActiveVariants(product: Product): ProductVariant[] {
+  return (product.variants || []).filter((v: ProductVariant) => v.isActive !== false);
+}
+
+/** Convert a user-entered quantity + unit string into base units (g/ml/pcs) */
+function toBaseUnits(qty: number, unit: string, unitType?: string): number {
+  const u = unit.toLowerCase().trim();
+  if (['kg', 'kgs'].includes(u)) return qty * 1000;
+  if (['g', 'gm', 'gms', 'gram', 'grams'].includes(u)) return qty;
+  if (['l', 'ltr', 'litre', 'litres', 'liter', 'liters'].includes(u)) return qty * 1000;
+  if (['ml', 'millilitre'].includes(u)) return qty;
+  // For count-based or generic "pcs", "packets", "boxes" etc.
+  return qty; // assume 1:1
+}
+
+/** Format base units into a human-readable label */
+function formatBaseUnits(baseQty: number, unitType: string): string {
+  if (unitType === 'weight') {
+    return baseQty >= 1000 ? `${(baseQty / 1000).toFixed(baseQty % 1000 === 0 ? 0 : 1)} kg` : `${baseQty} g`;
+  }
+  if (unitType === 'volume') {
+    return baseQty >= 1000 ? `${(baseQty / 1000).toFixed(baseQty % 1000 === 0 ? 0 : 1)} L` : `${baseQty} ml`;
+  }
+  return `${baseQty} pcs`;
 }
 
 export function SmartPurchaseNotepad() {
@@ -71,7 +103,10 @@ export function SmartPurchaseNotepad() {
     category: 'General',
     sellingPrice: '',
     sku: '',
-    addToInventory: true
+    addToInventory: true,
+    // Variant fields
+    variantId: '' as string,
+    variantName: '' as string,
   });
 
   // Suggestions State
@@ -79,6 +114,14 @@ export function SmartPurchaseNotepad() {
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   
+  // Quick Add Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [itemToCreate, setItemToCreate] = useState<{ id: string; name: string } | null>(null);
+
+  // Variant Picker State
+  const [variantPickerItemId, setVariantPickerItemId] = useState<string | null>(null);
+  const [showVariantPicker, setShowVariantPicker] = useState(false);
+
   // Load context
   useEffect(() => {
     async function loadData() {
@@ -152,7 +195,9 @@ export function SmartPurchaseNotepad() {
       category: 'General',
       sellingPrice: (item.costPrice * 1.4).toFixed(2), // 40% margin default
       sku: '',
-      addToInventory: !item.productId // Default to true if new
+      addToInventory: !item.productId, // Default to true if new
+      variantId: item.variantId || '',
+      variantName: item.variantName || '',
     });
   };
 
@@ -199,6 +244,22 @@ export function SmartPurchaseNotepad() {
         toast.success(`Created product: ${created.name}`);
       }
 
+      // Resolve variant fields from editForm
+      let finalVariantId: string | undefined = editForm.variantId || undefined;
+      let finalVariantName: string | undefined = editForm.variantName || undefined;
+      let finalRestockBase: number | undefined;
+
+      if (finalVariantId && finalProductId) {
+        const prod = products.find(p => p.id === finalProductId);
+        if (prod) {
+          const v = getActiveVariants(prod).find(va => va.id === finalVariantId);
+          if (v) {
+            finalVariantName = v.variantName;
+            finalRestockBase = toBaseUnits(finalQty, editForm.unit, v.unitType);
+          }
+        }
+      }
+
       // Update parsedItems
       setParsedItems(prev => prev.map(item => 
         item.id === editingItem.id ? {
@@ -210,7 +271,10 @@ export function SmartPurchaseNotepad() {
             costPrice: finalCost,
             totalCost: finalQty * finalCost,
             expiryDate: editForm.expiryDate,
-            isNew: !finalProductId
+            isNew: !finalProductId,
+            variantId: finalVariantId,
+            variantName: finalVariantName,
+            restockInBaseUnit: finalRestockBase,
         } : item
       ));
 
@@ -291,9 +355,36 @@ export function SmartPurchaseNotepad() {
       const newItems: PurchaseItemUI[] = result.items.map((item: any) => {
         let matchedProduct = null;
         if (item.productId) {
-           matchedProduct = products.find(p => p.id === item.productId);
-        } else {
-           matchedProduct = products.find(p => p.name.toLowerCase().includes(item.productName.toLowerCase()));
+           // AI returned a specific product ID — find exact match
+           matchedProduct = products.find(p => String(p.id) === String(item.productId));
+        }
+        if (!matchedProduct && item.productName) {
+           // Fuzzy name matching: check both directions (product name includes item name OR item name includes product name)
+           const itemNameLower = item.productName.toLowerCase().trim();
+           matchedProduct = products.find(p => {
+             const prodNameLower = p.name.toLowerCase().trim();
+             return prodNameLower === itemNameLower ||
+                    prodNameLower.includes(itemNameLower) ||
+                    itemNameLower.includes(prodNameLower);
+           });
+        }
+
+        // ── Auto-detect variant for matched products ──
+        let autoVariantId: string | undefined;
+        let autoVariantName: string | undefined;
+        let autoRestockBase: number | undefined;
+
+        if (matchedProduct && matchedProduct.hasVariants) {
+          const activeVars = getActiveVariants(matchedProduct);
+          if (activeVars.length === 1) {
+            // Single variant: auto-select
+            const v = activeVars[0];
+            autoVariantId = v.id;
+            autoVariantName = v.variantName;
+            const baseQty = toBaseUnits(item.quantity, item.unit || 'pcs', v.unitType);
+            autoRestockBase = baseQty;
+          }
+          // Multi-variant: leave unset — user will pick in confirmation
         }
 
         return {
@@ -307,7 +398,10 @@ export function SmartPurchaseNotepad() {
           expiryDate: item.expiryDate || matchedProduct?.expiryDate || undefined,
           confidence: item.confidence || 0.8,
           originalText: item.originalText,
-          isNew: !matchedProduct
+          isNew: !matchedProduct,
+          variantId: autoVariantId,
+          variantName: autoVariantName,
+          restockInBaseUnit: autoRestockBase,
         };
       });
 
@@ -391,7 +485,9 @@ export function SmartPurchaseNotepad() {
       const selectedVendor = vendors.find(v => v.id.toString() === selectedVendorId);
 
       // 1. Pre-process items: Create new products sequentially to avoid race conditions
-      const finalItems = [];
+      const finalItems: PurchaseItemUI[] = [];
+      let productCreationFailed = false;
+
       for (const item of parsedItems) {
         if (!item.productId) {
            // Auto-create product
@@ -401,7 +497,7 @@ export function SmartPurchaseNotepad() {
                 name: item.productName,
                 sku: `SKU-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 100)}`,
                 category: 'General',
-                stock: 0, // Stock will be added by the purchase logic
+                stock: 0, // Stock will be updated by the purchase endpoint
                 price: finalCost * 1.4, // Default selling price 
                 costPrice: finalCost,
                 sellingPrice: finalCost * 1.4,
@@ -417,6 +513,7 @@ export function SmartPurchaseNotepad() {
 
             try {
                 const created = await productsApi.add(newProduct);
+                console.log(`[Purchase] Created product "${created.name}" with id=${created.id}`);
                 setProducts(prev => [...prev, created]);
                 
                 finalItems.push({
@@ -424,8 +521,11 @@ export function SmartPurchaseNotepad() {
                     productId: created.id,
                     isNew: false
                 });
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Failed to auto-create product:", item.productName, err);
+                toast.error(`Failed to create "${item.productName}": ${err.message || 'Unknown error'}`);
+                productCreationFailed = true;
+                // Still include the item but flag it — purchase will still record it
                 finalItems.push(item);
             }
         } else {
@@ -433,31 +533,98 @@ export function SmartPurchaseNotepad() {
         }
       }
 
-      // 2. Create Purchase Record
+      // Warn user if some products could not be created
+      if (productCreationFailed) {
+        toast.warning('Some new products could not be created. They will be recorded in the purchase but stock will not be tracked for them.');
+      }
+
+      // 2. Compute total from final items (may have been edited)
+      const purchaseTotal = finalItems.reduce((sum, item) => sum + (item.totalCost || 0), 0);
+
+      // 3. Create Purchase Record — only include PurchaseItem fields
       const purchase = {
           id: `PUR-${Date.now()}`,
           vendorId: selectedVendor ? selectedVendor.id : undefined,
           vendorName: selectedVendor ? selectedVendor.name : 'Unknown Vendor',
           items: finalItems.map(({ id, isNew, confidence, originalText, ...rest }) => rest),
-          totalAmount: calculateTotal(),
+          totalAmount: purchaseTotal,
           createdAt: new Date(),
           notes: 'Added via Smart Purchase Notepad'
       };
 
+      console.log('[Purchase] Submitting purchase:', purchase.id, 'with', purchase.items.length, 'items');
+      
+      // Log each item for debugging
+      purchase.items.forEach((item, idx) => {
+        console.log(`[Purchase] Item ${idx + 1}: productId=${item.productId}, name="${item.productName}", qty=${item.quantity}, cost=${item.costPrice}, variant=${item.variantId || 'none'}, variantName=${item.variantName || '-'}, restockBase=${item.restockInBaseUnit || '-'}`);
+      });
+
       await purchasesApi.add(purchase);
 
-      const msg = detectedLanguage === 'te' ? "కొనుగోలు విజయవంతంగా నమోదైంది" : "Purchase recorded! Stock updated.";
+      const msg = detectedLanguage === 'te' ? 'కొనుగోలు విజయవంతంగా నమోదైంది' : 'Purchase recorded! Stock updated.';
       toast.success(msg);
       
       setParsedItems([]);
       setShowConfirmation(false);
       navigate('/dashboard/inventory');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Purchase error:', error);
-      toast.error('Failed to record purchase.');
+      toast.error(`Failed to record purchase: ${error.message || 'Unknown error'}`);
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // ── Variant Picker Logic ──
+  const openVariantPicker = (itemId: string) => {
+    setVariantPickerItemId(itemId);
+    setShowVariantPicker(true);
+  };
+
+  const handleSelectVariant = (variant: ProductVariant, item: PurchaseItemUI) => {
+    const product = products.find(p => p.id === item.productId);
+    if (!product) return;
+
+    const baseQty = toBaseUnits(item.quantity, item.unit, variant.unitType);
+
+    setParsedItems(prev => prev.map(it => {
+      if (it.id === item.id) {
+        return {
+          ...it,
+          variantId: variant.id,
+          variantName: variant.variantName,
+          restockInBaseUnit: baseQty,
+          // Update cost from variant if available and item has no custom cost
+          costPrice: it.costPrice || variant.costPrice || 0,
+          totalCost: it.quantity * (it.costPrice || variant.costPrice || 0),
+        };
+      }
+      return it;
+    }));
+
+    setShowVariantPicker(false);
+    setVariantPickerItemId(null);
+    toast.success(`Selected variant: ${variant.variantName}`);
+  };
+
+  const clearVariantSelection = (itemId: string) => {
+    setParsedItems(prev => prev.map(it => {
+      if (it.id === itemId) {
+        return {
+          ...it,
+          variantId: undefined,
+          variantName: undefined,
+          restockInBaseUnit: undefined,
+        };
+      }
+      return it;
+    }));
+  };
+
+  /** Get the matched product for a PurchaseItemUI */
+  const getItemProduct = (item: PurchaseItemUI): Product | undefined => {
+    if (!item.productId) return undefined;
+    return products.find(p => p.id === item.productId);
   };
 
   const handleCreateProduct = (item: PurchaseItemUI) => {
@@ -594,38 +761,111 @@ export function SmartPurchaseNotepad() {
           </div>
           
           <div className="p-4 space-y-4">
+            {/* Vendor Selector */}
+            <div className="flex items-center gap-2">
+              <Store className="w-4 h-4 text-gray-500" />
+              <select
+                value={selectedVendorId}
+                onChange={(e) => setSelectedVendorId(e.target.value)}
+                className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-[#0F4C81]/20 focus:border-[#0F4C81]"
+              >
+                <option value="">Select Vendor (optional)</option>
+                {vendors.map(v => (
+                  <option key={v.id} value={v.id.toString()}>{v.name}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="space-y-3 max-h-[300px] overflow-y-auto">
-                {parsedItems.map((item, idx) => (
-                <div key={idx} className={`flex flex-col gap-2 p-3 rounded-lg border ${item.isNew ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100'}`}>
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <p className="font-medium text-gray-900">{item.productName}</p>
-                                {item.isNew && <span className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded">New Product</span>}
+                {parsedItems.map((item, idx) => {
+                  const itemProduct = getItemProduct(item);
+                  const activeVars = itemProduct ? getActiveVariants(itemProduct) : [];
+                  const hasVariants = itemProduct?.hasVariants && activeVars.length > 0;
+                  const needsVariantSelection = hasVariants && !item.variantId;
+                  const selectedVariant = item.variantId ? activeVars.find(v => v.id === item.variantId) : null;
+
+                  return (
+                    <div key={idx} className={cn(
+                      "flex flex-col gap-2 p-3 rounded-lg border",
+                      item.isNew ? 'bg-amber-50 border-amber-200' : needsVariantSelection ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-100'
+                    )}>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium text-gray-900">{item.productName}</p>
+                            {item.isNew && <span className="text-[10px] text-amber-600 bg-amber-100 px-1 rounded">New Product</span>}
+                            {hasVariants && (
+                              <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full font-medium flex items-center gap-0.5">
+                                <Package className="w-2.5 h-2.5" /> {activeVars.length} variant{activeVars.length > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">"{item.originalText}"</p>
+                        </div>
+                        <div className="text-right flex flex-col items-end gap-1 flex-shrink-0">
+                          <span className="font-bold">{item.quantity} {item.unit}</span>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            onClick={() => openEditDialog(item)}
+                          >
+                            <Edit2 className="w-3 h-3 mr-1" /> Edit
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* ── Variant Selection Row ── */}
+                      {hasVariants && (
+                        <div className="flex items-center gap-2">
+                          {selectedVariant ? (
+                            <div className="flex items-center gap-2 flex-1">
+                              <div className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium flex-1",
+                                selectedVariant.isLoose ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"
+                              )}>
+                                <Package className="w-3 h-3" />
+                                <span>{selectedVariant.variantName}</span>
+                                {item.restockInBaseUnit != null && (
+                                  <span className="text-[10px] opacity-70 ml-1">
+                                    ({formatBaseUnits(item.restockInBaseUnit, selectedVariant.unitType || 'count')})
+                                  </span>
+                                )}
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-1.5 text-purple-600 hover:text-purple-700 hover:bg-purple-50 text-[10px]"
+                                onClick={() => openVariantPicker(item.id)}
+                              >
+                                Change
+                              </Button>
                             </div>
-                            <p className="text-xs text-gray-500 mt-1">"{item.originalText}"</p>
-                        </div>
-                        <div className="text-right flex flex-col items-end gap-1">
-                            <span className="font-bold">{item.quantity} {item.unit}</span>
-                            <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="h-6 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                onClick={() => openEditDialog(item)}
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full h-7 text-xs border-purple-300 text-purple-700 hover:bg-purple-50 gap-1"
+                              onClick={() => openVariantPicker(item.id)}
                             >
-                                <Edit2 className="w-3 h-3 mr-1" /> Edit
+                              <Package className="w-3 h-3" />
+                              Select Variant
+                              <ChevronRight className="w-3 h-3 ml-auto" />
                             </Button>
+                          )}
                         </div>
-                    </div>
-                    <div className="flex justify-between items-center text-sm text-gray-500 border-t border-dashed border-gray-200 pt-2">
+                      )}
+
+                      <div className="flex justify-between items-center text-sm text-gray-500 border-t border-dashed border-gray-200 pt-2">
                         <div className="flex gap-4">
-                            <span>Cost: ₹{item.costPrice}/unit</span>
-                            {item.expiryDate && <span className="text-red-500 text-xs mt-0.5">Exp: {item.expiryDate}</span>}
+                          <span>Cost: ₹{item.costPrice}/unit</span>
+                          {item.expiryDate && <span className="text-red-500 text-xs mt-0.5">Exp: {item.expiryDate}</span>}
                         </div>
                         <span className="font-semibold text-gray-700">Total: ₹{item.totalCost.toFixed(2)}</span>
+                      </div>
                     </div>
-                </div>
-                ))}
+                  );
+                })}
             </div>
 
             <div className="flex justify-between items-center pt-2 border-t">
@@ -635,11 +875,22 @@ export function SmartPurchaseNotepad() {
           </div>
 
           <DialogFooter className="p-4 bg-gray-50 flex-row gap-3">
-            <Button variant="outline" onClick={() => setShowConfirmation(false)} className="flex-1">
+            <Button variant="outline" onClick={() => setShowConfirmation(false)} className="flex-1" disabled={isProcessing}>
               Cancel
             </Button>
-            <Button onClick={handleConfirmPurchase} className="flex-[2] bg-[#0F4C81] hover:bg-[#0d3f6a]">
-              Confirm
+            <Button 
+              onClick={handleConfirmPurchase} 
+              className="flex-[2] bg-[#0F4C81] hover:bg-[#0d3f6a]"
+              disabled={isProcessing || parsedItems.length === 0}
+            >
+              {isProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Adding to Inventory...
+                </>
+              ) : (
+                'Confirm & Add to Stock'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -762,6 +1013,56 @@ export function SmartPurchaseNotepad() {
               />
             </div>
 
+            {/* Variant Selector (for existing products with variants) */}
+            {(() => {
+              if (!editingItem || editingItem.isNew) return null;
+              const editProduct = editingItem.productId ? products.find(p => p.id === editingItem.productId) : null;
+              if (!editProduct?.hasVariants) return null;
+              const editActiveVars = getActiveVariants(editProduct);
+              if (editActiveVars.length === 0) return null;
+              return (
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label className="text-right">
+                    Variant
+                  </Label>
+                  <div className="col-span-3">
+                    <select
+                      value={editForm.variantId}
+                      onChange={(e) => {
+                        const vId = e.target.value;
+                        const v = editActiveVars.find(va => va.id === vId);
+                        setEditForm({
+                          ...editForm,
+                          variantId: vId,
+                          variantName: v?.variantName || '',
+                          costPrice: v?.costPrice ? v.costPrice.toString() : editForm.costPrice,
+                        });
+                      }}
+                      className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-[#0F4C81]/20 focus:border-[#0F4C81]"
+                    >
+                      <option value="">-- Select Variant --</option>
+                      {editActiveVars.map(v => (
+                        <option key={v.id} value={v.id}>
+                          {v.variantName} ({v.packSizeInBaseUnit}{v.displayUnit}) - Cost: ₹{v.costPrice}
+                        </option>
+                      ))}
+                    </select>
+                    {editForm.variantId && (() => {
+                      const sv = editActiveVars.find(v => v.id === editForm.variantId);
+                      if (!sv) return null;
+                      return (
+                        <div className="mt-1.5 flex items-center gap-2 text-xs text-gray-500">
+                          <Package className="w-3 h-3" />
+                          <span>Stock: {formatBaseUnits(sv.stockInBaseUnit, sv.unitType)}</span>
+                          {sv.isLoose && <span className="text-green-600 font-medium">(Loose)</span>}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* New Product Fields */}
             {editingItem?.isNew && (
                 <>
@@ -831,6 +1132,127 @@ export function SmartPurchaseNotepad() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Variant Picker Dialog ── */}
+      <Dialog open={showVariantPicker} onOpenChange={(open) => {
+        if (!open) {
+          setShowVariantPicker(false);
+          setVariantPickerItemId(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-sm p-0 overflow-hidden bg-white">
+          {(() => {
+            const pickerItem = variantPickerItemId ? parsedItems.find(it => it.id === variantPickerItemId) : null;
+            const pickerProduct = pickerItem ? getItemProduct(pickerItem) : null;
+            const pickerVariants = pickerProduct ? getActiveVariants(pickerProduct) : [];
+
+            if (!pickerItem || !pickerProduct) {
+              return (
+                <div className="p-6 text-center text-gray-500">
+                  <p>No product selected.</p>
+                </div>
+              );
+            }
+
+            return (
+              <div>
+                <div className="bg-purple-600 p-4 text-white">
+                  <DialogTitle className="flex items-center gap-2 text-white">
+                    <Package className="w-5 h-5" />
+                    Select Variant
+                  </DialogTitle>
+                  <DialogDescription className="text-purple-100">
+                    {pickerProduct.name} - {pickerItem.quantity} {pickerItem.unit}
+                  </DialogDescription>
+                </div>
+
+                <div className="p-4 space-y-2 max-h-[350px] overflow-y-auto">
+                  {pickerVariants.map(variant => {
+                    const isSelected = pickerItem.variantId === variant.id;
+                    const restockPreview = toBaseUnits(pickerItem.quantity, pickerItem.unit, variant.unitType);
+                    return (
+                      <button
+                        key={variant.id}
+                        onClick={() => handleSelectVariant(variant, pickerItem)}
+                        className={cn(
+                          "w-full text-left p-3 rounded-lg border-2 transition-all",
+                          isSelected
+                            ? "border-purple-500 bg-purple-50 ring-1 ring-purple-300"
+                            : "border-gray-200 hover:border-purple-300 hover:bg-purple-50/50"
+                        )}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-gray-900 text-sm">{variant.variantName}</span>
+                              {variant.isLoose && (
+                                <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">Loose</span>
+                              )}
+                              {isSelected && (
+                                <Check className="w-4 h-4 text-purple-600" />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                              <span>Pack: {variant.packSizeInBaseUnit} {variant.displayUnit}</span>
+                              <span>Cost: ₹{variant.costPrice}</span>
+                              <span>Sell: ₹{variant.sellingPrice}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 mt-2 pt-2 border-t border-gray-100 text-xs">
+                          <span className="text-gray-500">
+                            Current stock: {formatBaseUnits(variant.stockInBaseUnit, variant.unitType)}
+                          </span>
+                          <span className="text-purple-600 font-medium">
+                            Restock: +{formatBaseUnits(restockPreview, variant.unitType)}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="p-3 bg-gray-50 border-t flex gap-2">
+                  {pickerItem.variantId && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={() => {
+                        clearVariantSelection(pickerItem.id);
+                        setShowVariantPicker(false);
+                        setVariantPickerItemId(null);
+                      }}
+                    >
+                      <Trash2 className="w-3 h-3 mr-1" />
+                      Clear
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto text-xs"
+                    onClick={() => {
+                      setShowVariantPicker(false);
+                      setVariantPickerItemId(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Product Modal */}
+      <QuickAddProductModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        initialName={itemToCreate?.name || ''}
+        onSuccess={handleProductCreated}
+      />
     </div>
   );
 }

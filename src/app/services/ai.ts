@@ -3,24 +3,27 @@ import { supabase } from './supabaseClient';
 
 const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-29b58f9a`;
 
-// Get fresh access token from Supabase session
+// Get fresh access token
 async function getAccessToken(): Promise<string | null> {
   try {
-    const { data: { session }, error } = await supabase.auth.getSession();
-    
-    if (error) {
-      console.error('Error getting session for AI call:', error);
-      return null;
+    // 1. Try Supabase Session first
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      return session.access_token;
     }
     
-    if (!session) {
-      console.warn('No active session found for AI call');
-      return null;
+    // 2. Fallback to localStorage for Custom Auth
+    if (typeof window !== 'undefined') {
+        const storedToken = localStorage.getItem('auth_token');
+        if (storedToken) return storedToken;
     }
     
-    return session.access_token;
+    return null;
   } catch (error) {
     console.error('Error retrieving access token:', error);
+    if (typeof window !== 'undefined') {
+        return localStorage.getItem('auth_token');
+    }
     return null;
   }
 }
@@ -33,12 +36,21 @@ export async function generateProductImage(productName: string, productDescripti
       throw new Error('No authentication token found. Please sign in.');
     }
 
+    // Prepare headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (token && token.startsWith('access_')) {
+        headers['Authorization'] = `Bearer ${publicAnonKey}`;
+        headers['x-custom-auth-token'] = token;
+    } else {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}/ai/generate-product-image`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers,
       body: JSON.stringify({
         productName,
         productDescription,
@@ -108,12 +120,21 @@ export async function enhanceProductDescription(productName: string, currentDesc
       throw new Error('No authentication token found. Please sign in.');
     }
 
+    // Prepare headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (token && token.startsWith('access_')) {
+        headers['Authorization'] = `Bearer ${publicAnonKey}`;
+        headers['x-custom-auth-token'] = token;
+    } else {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}/ai/enhance-description`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers,
       body: JSON.stringify({
         productName,
         currentDescription,
@@ -215,12 +236,21 @@ export async function analyzePurchasePatterns(): Promise<{ analysis: AIAnalysis;
 
     console.log('Calling AI pattern analysis endpoint...');
 
+    // Prepare headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (token && token.startsWith('access_')) {
+        headers['Authorization'] = `Bearer ${publicAnonKey}`;
+        headers['x-custom-auth-token'] = token;
+    } else {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}/ai/analyze-patterns`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers,
     });
 
     const data = await response.json();

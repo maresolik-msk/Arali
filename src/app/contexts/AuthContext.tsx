@@ -16,7 +16,8 @@ import {
 import { PricingPlan, DEFAULT_PLAN } from '../constants/pricing';
 import { supabase } from '../services/supabaseClient';
 import { toast } from 'sonner';
-import { clearTokenCache } from '../services/api';
+// clearTokenCache is dynamically imported to avoid eagerly pulling in the
+// entire api.ts module (983 lines) at startup — it's only needed on sign-out.
 
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;
@@ -28,6 +29,8 @@ interface AuthContextType extends AuthState {
   verifyOTPAndResetPassword: (email: string, otp: string, newPassword: string) => Promise<void>;
   signInWithPhone: (phone: string) => Promise<void>;
   verifyPhoneOtp: (phone: string, token: string) => Promise<void>;
+  refreshUser: () => Promise<void>;
+  updateUser: (user: User) => void;
   isLoading: boolean;
 }
 
@@ -39,14 +42,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  const updateUser = (newUser: User) => {
+    setUser(newUser);
+    localStorage.setItem('user', JSON.stringify(newUser));
+  };
+
+  const refreshUser = async () => {
+    try {
+      const session = await getCurrentSession();
+      // Only update state if session is valid or if it explicitly returned authenticated=false
+      // If getCurrentSession threw/returned null/undefined due to network error, we might want to preserve state?
+      // But getCurrentSession handles errors internally and returns AuthState.
+      
+      if (session.isAuthenticated) {
+        setUser(session.user);
+        setAccessToken(session.accessToken);
+        setIsAuthenticated(true);
+      } else {
+        // Only clear if explicitly not authenticated (e.g. 401/403 or no session)
+        // Check if we have a network error indication? getCurrentSession returns defaults on error.
+        // We should probably trust it, BUT we need to be careful about 500s.
+        setUser(null);
+        setAccessToken(null);
+        setIsAuthenticated(false);
+      }
+    } catch (error) {
+      console.error('Error refreshing user:', error);
+    }
+  };
+
   // Check for existing session on mount
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const session = await getCurrentSession();
-        setUser(session.user);
-        setAccessToken(session.accessToken);
-        setIsAuthenticated(session.isAuthenticated);
+        await refreshUser();
       } catch (error) {
         console.error('Error checking session:', error);
         // Clear auth state on error
@@ -65,15 +94,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log('Auth state changed:', event);
       
       if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
-        // Clear auth state
+        // CRITICAL: Do NOT clear auth state if the current user is authenticated
+        // via custom KV auth (phone OTP). Supabase fires SIGNED_OUT when its own
+        // session expires or is missing, but this is irrelevant for KV auth users.
+        // Clearing state here was causing the redirect loop for new phone users
+        // after plan selection.
+        const currentToken = localStorage.getItem('auth_token');
+        if (currentToken && currentToken.startsWith('access_')) {
+          console.log('[Auth] Ignoring Supabase SIGNED_OUT event — current user is KV-authenticated');
+          return;
+        }
+        // Clear auth state only for Supabase-authenticated users
         setUser(null);
         setAccessToken(null);
         setIsAuthenticated(false);
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user');
         sessionStorage.removeItem('access_token');
-        clearTokenCache();
+        import('../services/api').then(m => m.clearTokenCache()).catch(() => {});
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // Only process Supabase session events if we're NOT using KV auth.
+        // If a KV user is active, Supabase session events should be ignored
+        // to prevent overwriting the KV auth state with stale Supabase data.
+        const currentToken = localStorage.getItem('auth_token');
+        if (currentToken && currentToken.startsWith('access_')) {
+          console.log('[Auth] Ignoring Supabase SIGNED_IN/TOKEN_REFRESHED — current user is KV-authenticated');
+          return;
+        }
         // Update auth state with new/refreshed token
         if (session) {
           const user: User = {
@@ -94,6 +141,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           sessionStorage.setItem('access_token', session.access_token);
         }
       } else if (event === 'USER_UPDATED') {
+        // Only process if NOT using KV auth
+        const currentToken = localStorage.getItem('auth_token');
+        if (currentToken && currentToken.startsWith('access_')) {
+          console.log('[Auth] Ignoring Supabase USER_UPDATED — current user is KV-authenticated');
+          return;
+        }
         // Update user info
         if (session) {
           const user: User = {
@@ -236,6 +289,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         verifyOTPAndResetPassword,
         signInWithPhone,
         verifyPhoneOtp,
+        refreshUser,
+        updateUser,
       }}
     >
       {children}
@@ -263,6 +318,8 @@ export function useAuth() {
       verifyOTPAndResetPassword: async () => { throw new Error('Auth not initialized'); },
       signInWithPhone: async () => { throw new Error('Auth not initialized'); },
       verifyPhoneOtp: async () => { throw new Error('Auth not initialized'); },
+      refreshUser: async () => { throw new Error('Auth not initialized'); },
+      updateUser: (_user: User) => { throw new Error('Auth not initialized'); },
     };
   }
   return context;

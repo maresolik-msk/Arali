@@ -1,4 +1,3 @@
-
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 // Rule-based fallback parser when AI is unavailable
@@ -94,12 +93,17 @@ function fallbackPurchaseParser(note: string, productsList: any[]) {
     if (dateMatch) {
       expiryDate = dateMatch[0];
       cleanLine = cleanLine.replace(dateMatch[0], '').trim();
+      // Also clean "exp", "expiry", "expiry date" keywords that may remain
+      cleanLine = cleanLine.replace(/\b(?:expiry\s*date|expiry|exp)\b\s*:?\s*/gi, '').trim();
     } else if (cleanLine.includes('exp')) {
-        // Try to capture text after 'exp' or 'expiry'
-        const expMatch = cleanLine.match(/(?:exp|expiry)\s*:?\s*(\S+)/);
+        // Try to capture text after 'exp' or 'expiry' (including multi-word dates like "march 15 2026")
+        const expMatch = cleanLine.match(/(?:expiry\s*date|expiry|exp)\s*:?\s*(.+?)(?:\s+(?:at|for|rs|₹)|$)/i);
         if (expMatch) {
-            expiryDate = expMatch[1];
+            expiryDate = expMatch[1].trim();
             cleanLine = cleanLine.replace(expMatch[0], '').trim();
+        } else {
+            // Fallback: just remove the keyword
+            cleanLine = cleanLine.replace(/\b(?:expiry\s*date|expiry|exp)\b\s*:?\s*/gi, '').trim();
         }
     }
 

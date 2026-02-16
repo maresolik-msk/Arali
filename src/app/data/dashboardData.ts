@@ -8,6 +8,30 @@ export interface Batch {
   receivedDate: string;
 }
 
+// ──────────────────────────────────────────────
+// Product Variant System (Base-unit architecture)
+// ──────────────────────────────────────────────
+
+export type UnitType = 'weight' | 'volume' | 'count';
+export type BaseUnit = 'g' | 'ml' | 'pcs';
+
+export interface ProductVariant {
+  id: string;
+  variantName: string;           // "1kg Pack", "5kg Pack", "Loose"
+  unitType: UnitType;            // weight | volume | count
+  packSizeInBaseUnit: number;    // 1000 (grams), 5000, etc. For loose=1
+  displayUnit: string;           // "kg", "g", "L", "ml", "pcs" — for UI display
+  sellingPrice: number;
+  mrp: number;
+  costPrice: number;
+  barcode?: string;
+  isLoose: boolean;              // If true, customer can buy any quantity
+  isActive: boolean;             // Soft delete support
+  stockInBaseUnit: number;       // Stock in grams / ml / pieces
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -28,6 +52,10 @@ export interface Product {
   batches?: Batch[];
   createdAt: Date;
   updatedAt: Date;
+  // ── Variant system fields (backward compatible) ──
+  variants?: ProductVariant[];
+  baseUnit?: BaseUnit;           // 'g' | 'ml' | 'pcs'
+  hasVariants?: boolean;         // Flag: product uses variant system
 }
 
 export interface Order {
@@ -84,6 +112,9 @@ export interface OrderItem {
   quantity: number;
   price: number;
   subtotal: number;
+  variantId?: string;
+  variantName?: string;
+  looseQuantityInBaseUnit?: number;
 }
 
 export interface PurchaseItem {
@@ -94,6 +125,10 @@ export interface PurchaseItem {
   costPrice: number;
   totalCost: number;
   expiryDate?: string;
+  // ── Variant fields (optional, backward compatible) ──
+  variantId?: string;
+  variantName?: string;
+  restockInBaseUnit?: number;   // Exact base-unit qty to add to variant stock
 }
 
 export interface Purchase {

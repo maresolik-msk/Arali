@@ -1,11 +1,10 @@
 import { supabase } from './supabaseClient';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { PricingPlan, DEFAULT_PLAN } from '../constants/pricing';
 
 const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-29b58f9a`;
 
 const supabaseUrl = `https://${projectId}.supabase.co`;
-
-import { PricingPlan, DEFAULT_PLAN } from '../constants/pricing';
 
 export interface User {
   id: string;
@@ -28,7 +27,6 @@ function isTokenExpired(token: string): boolean {
     // JWT format: header.payload.signature
     const parts = token.split('.');
     if (parts.length !== 3) {
-      console.error('Invalid JWT format');
       return true; // Treat invalid tokens as expired
     }
     
@@ -40,19 +38,8 @@ function isTokenExpired(token: string): boolean {
     const now = Date.now();
     const bufferMs = 5 * 60 * 1000; // 5 minute buffer
     
-    const isExpired = expiryTime <= now + bufferMs;
-    
-    if (isExpired) {
-      const minutesAgo = Math.round((now - expiryTime) / 1000 / 60);
-      console.warn(`[Auth] Token expired ${minutesAgo} minutes ago`);
-    } else {
-      const minutesLeft = Math.round((expiryTime - now) / 1000 / 60);
-      console.log(`[Auth] Token valid for ${minutesLeft} more minutes`);
-    }
-    
-    return isExpired;
+    return expiryTime <= now + bufferMs;
   } catch (error) {
-    console.error('Error decoding JWT:', error);
     return true; // Treat decode errors as expired
   }
 }
@@ -153,6 +140,114 @@ export async function signOut(): Promise<void> {
 // Get current session
 export async function getCurrentSession(): Promise<AuthState> {
   try {
+    const storedToken = localStorage.getItem('auth_token');
+    
+    // Check for Custom KV Auth Token
+    if (storedToken && storedToken.startsWith('access_')) {
+        console.log('[Auth] Detected custom auth token, verifying...');
+        
+        // Verify against backend
+        const response = await fetch(`${API_BASE_URL}/user/profile`, {
+            headers: {
+                'Authorization': `Bearer ${publicAnonKey}`,
+                'x-custom-auth-token': storedToken
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const user: User = {
+                id: data.user.id,
+                email: data.user.mobile_number || data.user.email,
+                name: data.user.name || data.user.mobile_number,
+                plan: (data.user.plan as PricingPlan) || DEFAULT_PLAN,
+                hasSelectedPlan: !!data.user.plan_selected,
+            };
+            
+            // Update storage
+            localStorage.setItem('user', JSON.stringify(user));
+            
+            return {
+                user,
+                accessToken: storedToken,
+                isAuthenticated: true
+            };
+        } else {
+            // Only clear session if it's explicitly invalid (401/403)
+            // For 500s or network errors, we might want to keep the session locally 
+            // but we can't verify it. 
+            // The safest approach for "redirect to login" issues is to only logout on 401.
+            
+            if (response.status === 401 || response.status === 403) {
+                // Attempt to refresh the KV token before giving up
+                try {
+                    const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh-token`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${publicAnonKey}`,
+                        },
+                        body: JSON.stringify({ token: storedToken }),
+                    });
+                    if (refreshRes.ok) {
+                        const refreshData = await refreshRes.json();
+                        const newToken = refreshData.session?.access_token;
+                        if (newToken) {
+                            console.log('[Auth] KV token refreshed during session check');
+                            localStorage.setItem('auth_token', newToken);
+                            sessionStorage.setItem('access_token', newToken);
+                            // Retry profile fetch with new token
+                            const retryRes = await fetch(`${API_BASE_URL}/user/profile`, {
+                                headers: {
+                                    'Authorization': `Bearer ${publicAnonKey}`,
+                                    'x-custom-auth-token': newToken,
+                                },
+                            });
+                            if (retryRes.ok) {
+                                const retryData = await retryRes.json();
+                                const user: User = {
+                                    id: retryData.user.id,
+                                    email: retryData.user.mobile_number || retryData.user.email,
+                                    name: retryData.user.name || retryData.user.mobile_number,
+                                    plan: (retryData.user.plan as PricingPlan) || DEFAULT_PLAN,
+                                    hasSelectedPlan: !!retryData.user.plan_selected,
+                                };
+                                localStorage.setItem('user', JSON.stringify(user));
+                                return { user, accessToken: newToken, isAuthenticated: true };
+                            }
+                        }
+                    }
+                } catch (refreshErr) {
+                    console.log('[Auth] KV token refresh failed during session check:', refreshErr);
+                }
+                // Refresh didn't work — clear session
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('user');
+                return { user: null, accessToken: null, isAuthenticated: false };
+            } else {
+                console.warn(`[Auth] Backend verification failed with status ${response.status}. Preserving local session.`);
+                // Return existing local user if available, otherwise fail
+                const localUserStr = localStorage.getItem('user');
+                if (localUserStr) {
+                    try {
+                        const localUser = JSON.parse(localUserStr);
+                        return {
+                            user: localUser,
+                            accessToken: storedToken,
+                            isAuthenticated: true
+                        };
+                    } catch (e) {
+                         // Corrupt local data
+                         localStorage.removeItem('auth_token');
+                         localStorage.removeItem('user');
+                         return { user: null, accessToken: null, isAuthenticated: false };
+                    }
+                }
+                return { user: null, accessToken: null, isAuthenticated: false };
+            }
+        }
+    }
+
     // First try to refresh the session to ensure we have a valid token
     console.log('[Auth] Getting current session - attempting refresh first...');
     const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
@@ -436,16 +531,42 @@ export async function verifyPhoneOtp(phone: string, token: string): Promise<Auth
     throw new Error(data.error || 'Invalid code');
   }
 
-  // Map backend user to frontend User interface
-  // Backend returns: { id, mobile_number, role, created_at }
-  const user: User = {
+  // Initial user mapping from verify response
+  let user: User = {
     id: data.user.id,
-    email: data.user.mobile_number, // Use mobile as email identifier for compatibility
+    email: data.user.mobile_number, 
     phone: data.user.mobile_number,
-    name: data.user.mobile_number, // Default name to mobile number
+    name: data.user.mobile_number, 
     plan: DEFAULT_PLAN,
     hasSelectedPlan: false,
   };
+
+  // FETCH FULL PROFILE to get correct plan/name details
+  // The verify endpoint returns a minimal user object, so we need to fetch the full profile
+  // from the KV store to ensure we have the correct plan state.
+  try {
+      const accessToken = data.session.access_token;
+      const profileResponse = await fetch(`${API_BASE_URL}/user/profile`, {
+        headers: {
+            'Authorization': `Bearer ${publicAnonKey}`,
+            'x-custom-auth-token': accessToken
+        }
+      });
+      
+      if (profileResponse.ok) {
+          const profileData = await profileResponse.json();
+          user = {
+            ...user,
+            id: profileData.user.id || user.id,
+            name: profileData.user.name || user.name,
+            plan: (profileData.user.plan as PricingPlan) || DEFAULT_PLAN,
+            hasSelectedPlan: !!profileData.user.plan_selected,
+          };
+          console.log('[Auth] Fetched full profile for phone user:', user.email);
+      }
+  } catch (err) {
+      console.warn('[Auth] Failed to fetch full profile after phone login, using defaults:', err);
+  }
 
   // Store auth state
   localStorage.setItem('auth_token', data.session.access_token);
@@ -460,7 +581,7 @@ export async function verifyPhoneOtp(phone: string, token: string): Promise<Auth
 }
 
 // Update User Profile (Plan Selection)
-export async function updateUserProfile(updates: Partial<User> & { plan_selected?: boolean }): Promise<void> {
+export async function updateUserProfile(updates: Partial<User> & { plan_selected?: boolean }): Promise<User> {
   const token = localStorage.getItem('auth_token');
   if (!token) throw new Error('No auth token found');
 
@@ -472,26 +593,56 @@ export async function updateUserProfile(updates: Partial<User> & { plan_selected
     if (updates.plan_selected !== undefined) metadataUpdates.plan_selected = updates.plan_selected;
     if (updates.name) metadataUpdates.name = updates.name;
 
-    const { error } = await supabase.auth.updateUser({
+    const { data, error } = await supabase.auth.updateUser({
       data: metadataUpdates
     });
     
     if (error) throw error;
-    return;
+    
+    // Construct updated user from Supabase response
+    const updatedUser: User = {
+        id: data.user.id,
+        email: data.user.email!,
+        name: data.user.user_metadata.name || data.user.email!.split('@')[0],
+        plan: (data.user.user_metadata.plan as PricingPlan) || DEFAULT_PLAN,
+        hasSelectedPlan: !!data.user.user_metadata.plan_selected,
+    };
+    return updatedUser;
   }
 
   // Use Custom Backend for KV users
+  // Note: We MUST pass the publicAnonKey in Authorization header to pass Supabase Gateway
+  // and pass our custom token in a separate header to avoid "Invalid JWT" errors from the gateway.
   const response = await fetch(`${API_BASE_URL}/user/profile`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${publicAnonKey}`, 
+      'x-custom-auth-token': token,
     },
     body: JSON.stringify(updates),
   });
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error || 'Failed to update profile');
+    const errorMsg = data.details 
+      ? `${data.error}: ${data.details}` 
+      : (data.error || 'Failed to update profile');
+    
+    console.error('Backend update profile error:', data);
+    throw new Error(errorMsg);
   }
+  
+  // Correctly map backend user response to frontend User interface
+  const backendUser = data.user;
+  const updatedUser: User = {
+      id: backendUser.id,
+      email: backendUser.mobile_number || backendUser.email || '',
+      name: backendUser.name || backendUser.mobile_number || '',
+      plan: (backendUser.plan as PricingPlan) || DEFAULT_PLAN,
+      hasSelectedPlan: !!backendUser.plan_selected,
+      phone: backendUser.mobile_number
+  };
+  
+  return updatedUser;
 }

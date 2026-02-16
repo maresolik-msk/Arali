@@ -9,7 +9,7 @@ import { updateUserProfile } from '../services/auth';
 import { toast } from 'sonner';
 
 export function SelectPlan() {
-  const { user } = useAuth();
+  const { user, refreshUser, updateUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [isUpdating, setIsUpdating] = useState(false);
@@ -28,17 +28,24 @@ export function SelectPlan() {
     try {
       setIsUpdating(true);
       
-      await updateUserProfile({
+      const updatedUser = await updateUserProfile({
         plan: planKey,
         plan_selected: true,
       });
 
+      // Update local state immediately with the returned user object
+      // This avoids the need to call refreshUser() which triggers another API call
+      // and eliminates potential race conditions or "logout on error" risks
+      updateUser(updatedUser);
+
       toast.success(isUpgrade ? `Upgraded to ${PLAN_DETAILS[planKey].title} Plan!` : `Welcome to the ${PLAN_DETAILS[planKey].title} Plan!`);
       navigate('/dashboard');
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error selecting plan:', error);
-      toast.error('Failed to update plan. Please try again.');
+      // Show backend error detail if available, otherwise fallback
+      const errorMessage = error.message || 'Failed to update plan. Please try again.';
+      toast.error(errorMessage);
     } finally {
       setIsUpdating(false);
     }

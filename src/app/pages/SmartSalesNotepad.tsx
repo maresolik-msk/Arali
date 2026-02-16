@@ -765,8 +765,8 @@ export function SmartSalesNotepad() {
           
           <div className="p-4 space-y-4">
             <div className="space-y-3 max-h-[300px] overflow-y-auto">
-                {parsedItems.map((item, idx) => (
-                <div key={idx} className={`flex justify-between items-start p-3 rounded-lg border ${item.confidence < 80 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100'}`}>
+                {parsedItems.map((item) => (
+                <div key={item.id} className={`flex justify-between items-start p-3 rounded-lg border ${item.confidence < 80 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-100'}`}>
                     <div className="flex-1">
                     <div className="flex items-center gap-2">
                         <p className="font-medium text-gray-900">{item.productName}</p>

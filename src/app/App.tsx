@@ -1,39 +1,61 @@
-import React from 'react';
-import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router';
-import { Layout } from './components/layout/Layout';
-import { DashboardLayout } from './components/layout/DashboardLayout';
-import { Home } from './pages/Home';
-import { HowItWorks } from './pages/HowItWorks';
-import { Features } from './pages/Features';
-import { WhyArali } from './pages/WhyArali';
-import { Story } from './pages/Story';
-import { FAQ } from './pages/FAQ';
-import { GetStarted } from './pages/GetStarted';
-import { PricingPage } from './pages/PricingPage';
-import { Login } from './pages/Login';
-import { SelectPlan } from './pages/SelectPlan';
-import { Dashboard } from './pages/Dashboard';
-import { Inventory } from './pages/Inventory';
-import { POS } from './pages/POS';
-import { Orders } from './pages/Orders';
-import { Customers } from './pages/Customers';
-import { Vendors } from './pages/Vendors';
-import { Analytics } from './pages/Analytics';
-import { RevenueDetailed } from './pages/RevenueDetailed';
-import { DashboardSettings } from './pages/DashboardSettings';
-import { AIInsights } from './pages/AIInsights';
-import { ProductDetail } from './pages/ProductDetail';
-import { SmartSalesNotepad } from './pages/SmartSalesNotepad';
-import { SmartPurchaseNotepad } from './pages/SmartPurchaseNotepad';
+import React, { useMemo, Suspense } from 'react';
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router';
+// Only truly critical infrastructure is eagerly imported.
+// Everything else is lazy-loaded to keep App.tsx's module graph small
+// and prevent Vite HMR timeouts through the Figma Make proxy.
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Toaster } from 'sonner';
-import { PWAInstallPrompt } from './components/PWAInstallPrompt';
-import { OfflineIndicator } from './components/OfflineIndicator';
 import { ErrorPage } from './components/ErrorPage';
-import { NotFound } from './pages/NotFound';
-import { BlogList } from './pages/BlogList';
-import { BlogPost } from './pages/BlogPost';
-import { FeatureGuard } from './components/FeatureGuard';
+
+// --- Lazy-loaded layout components ---
+const Layout = React.lazy(() => import('./components/layout/Layout').then(m => ({ default: m.Layout })));
+const DashboardLayout = React.lazy(() => import('./components/layout/DashboardLayout').then(m => ({ default: m.DashboardLayout })));
+const FeatureGuard = React.lazy(() => import('./components/FeatureGuard').then(m => ({ default: m.FeatureGuard })));
+const PWAInstallPrompt = React.lazy(() => import('./components/PWAInstallPrompt').then(m => ({ default: m.PWAInstallPrompt })));
+const OfflineIndicator = React.lazy(() => import('./components/OfflineIndicator').then(m => ({ default: m.OfflineIndicator })));
+
+// --- Lazy-loaded page components ---
+// Using .then(m => ({ default: m.X })) because pages use named exports
+const Home = React.lazy(() => import('./pages/Home').then(m => ({ default: m.Home })));
+const HowItWorks = React.lazy(() => import('./pages/HowItWorks').then(m => ({ default: m.HowItWorks })));
+const Features = React.lazy(() => import('./pages/Features').then(m => ({ default: m.Features })));
+const WhyArali = React.lazy(() => import('./pages/WhyArali').then(m => ({ default: m.WhyArali })));
+const Story = React.lazy(() => import('./pages/Story').then(m => ({ default: m.Story })));
+const FAQ = React.lazy(() => import('./pages/FAQ').then(m => ({ default: m.FAQ })));
+const GetStarted = React.lazy(() => import('./pages/GetStarted').then(m => ({ default: m.GetStarted })));
+const PricingPage = React.lazy(() => import('./pages/PricingPage').then(m => ({ default: m.PricingPage })));
+const Login = React.lazy(() => import('./pages/Login').then(m => ({ default: m.Login })));
+const SelectPlan = React.lazy(() => import('./pages/SelectPlan').then(m => ({ default: m.SelectPlan })));
+const Dashboard = React.lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const Inventory = React.lazy(() => import('./pages/Inventory').then(m => ({ default: m.Inventory })));
+const POS = React.lazy(() => import('./pages/POS').then(m => ({ default: m.POS })));
+const Orders = React.lazy(() => import('./pages/Orders').then(m => ({ default: m.Orders })));
+const Customers = React.lazy(() => import('./pages/Customers').then(m => ({ default: m.Customers })));
+const Vendors = React.lazy(() => import('./pages/Vendors').then(m => ({ default: m.Vendors })));
+const Analytics = React.lazy(() => import('./pages/Analytics').then(m => ({ default: m.Analytics })));
+const RevenueDetailed = React.lazy(() => import('./pages/RevenueDetailed').then(m => ({ default: m.RevenueDetailed })));
+const DashboardSettings = React.lazy(() => import('./pages/DashboardSettings').then(m => ({ default: m.DashboardSettings })));
+const AIInsights = React.lazy(() => import('./pages/AIInsights').then(m => ({ default: m.AIInsights })));
+const ProductDetail = React.lazy(() => import('./pages/ProductDetail').then(m => ({ default: m.ProductDetail })));
+const SmartSalesNotepad = React.lazy(() => import('./pages/SmartSalesNotepad').then(m => ({ default: m.SmartSalesNotepad })));
+const SmartPurchaseNotepad = React.lazy(() => import('./pages/SmartPurchaseNotepad').then(m => ({ default: m.SmartPurchaseNotepad })));
+const NotFound = React.lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })));
+const BlogList = React.lazy(() => import('./pages/BlogList').then(m => ({ default: m.BlogList })));
+const BlogPost = React.lazy(() => import('./pages/BlogPost').then(m => ({ default: m.BlogPost })));
+
+// --- Page loading fallback ---
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="w-16 h-16 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin" />
+    </div>
+  );
+}
+
+// Suspense wrapper shorthand for route elements
+function S({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
+}
 
 // Arali - Premium Retail Management PWA v3.0
 // Progressive Web App with offline support, installable on iOS/Android/Desktop
@@ -71,8 +93,14 @@ function ProtectedRoute({ children, requirePlan = true }: ProtectedRouteProps) {
     return <>{children}</>;
   } catch (error) {
     console.error('ProtectedRoute error:', error);
-    // Fallback to login on any error
-    return <Navigate to="/login" replace />;
+    // During hot reload or transient errors, show loading instead of
+    // aggressively redirecting to login (which caused redirect loops
+    // when errors were transient).
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-16 h-16 border-4 border-[#0F4C81]/20 border-t-[#0F4C81] rounded-full animate-spin" />
+      </div>
+    );
   }
 }
 
@@ -93,7 +121,7 @@ function LoginRoute() {
       return <Navigate to="/dashboard" replace />;
     }
 
-    return <Login />;
+    return <S><Login /></S>;
   } catch (error) {
     console.error('LoginRoute error:', error);
     // During hot reload, the context might be temporarily unavailable
@@ -109,101 +137,110 @@ function LoginRoute() {
   }
 }
 
-// Define the router configuration
-const router = createBrowserRouter([
-  {
-    path: "/login",
-    element: <LoginRoute />,
-    errorElement: <ErrorPage />
-  },
-  {
-    path: "/select-plan",
-    element: (
-      <ProtectedRoute requirePlan={false}>
-        <SelectPlan />
-      </ProtectedRoute>
-    ),
-    errorElement: <ErrorPage />
-  },
-  {
-    path: "/",
-    element: <Layout />,
-    errorElement: <ErrorPage />,
-    children: [
-      { index: true, element: <Home /> },
-      { path: "how-it-works", element: <HowItWorks /> },
-      { path: "features", element: <Features /> },
-      { path: "pricing", element: <PricingPage /> },
-      { path: "why-arali", element: <WhyArali /> },
-      { path: "story", element: <Story /> },
-      { path: "faq", element: <FAQ /> },
-      { path: "get-started", element: <GetStarted /> },
-      { path: "blog", element: <BlogList /> },
-      { path: "blog/:slug", element: <BlogPost /> },
-      { path: "*", element: <NotFound /> }
-    ]
-  },
-  {
-    path: "/dashboard",
-    element: (
-      <ProtectedRoute>
-        <DashboardLayout />
-      </ProtectedRoute>
-    ),
-    errorElement: <ErrorPage />,
-    children: [
-      { index: true, element: <Dashboard /> },
-      { path: "pos", element: <POS /> },
-      { path: "inventory", element: <Inventory /> },
-      { path: "inventory/:productId", element: <ProductDetail /> },
-      { path: "notepad", element: <SmartSalesNotepad /> },
-      { path: "express", element: <SmartSalesNotepad /> },
-      { path: "purchase-notepad", element: <SmartPurchaseNotepad /> },
-      { path: "orders", element: <Orders /> },
-      { path: "customers", element: <Customers /> },
-      { path: "vendors", element: <Vendors /> },
-      { 
-        path: "analytics", 
-        element: (
-          <FeatureGuard 
-            feature="canViewReports" 
-            title="Analytics Locked" 
-            description="Gain deep insights into your business performance with advanced analytics."
-          >
-            <Analytics />
-          </FeatureGuard>
-        ) 
-      },
-      { path: "revenue", element: <RevenueDetailed /> },
-      { 
-        path: "insights", 
-        element: (
-          <FeatureGuard 
-            feature="canForecast" 
-            title="AI Insights Locked" 
-            description="Predict trends and optimize inventory with AI-powered forecasting."
-          >
-            <AIInsights />
-          </FeatureGuard>
-        ) 
-      },
-      { path: "settings", element: <DashboardSettings /> },
-      { path: "*", element: <NotFound /> }
-    ]
-  },
-  {
-    path: "*",
-    element: <NotFound />
-  }
-]);
+// Create router configuration — defined as a function to be called once
+// via useMemo inside the App component. This prevents HMR from recreating
+// the router at module scope and causing dynamic import errors.
+function createAppRouter() {
+  return createBrowserRouter([
+    {
+      path: "/login",
+      element: <LoginRoute />,
+      errorElement: <ErrorPage />
+    },
+    {
+      path: "/select-plan",
+      element: (
+        <ProtectedRoute requirePlan={false}>
+          <S><SelectPlan /></S>
+        </ProtectedRoute>
+      ),
+      errorElement: <ErrorPage />
+    },
+    {
+      path: "/",
+      element: <S><Layout /></S>,
+      errorElement: <ErrorPage />,
+      children: [
+        { index: true, element: <S><Home /></S> },
+        { path: "how-it-works", element: <S><HowItWorks /></S> },
+        { path: "features", element: <S><Features /></S> },
+        { path: "pricing", element: <S><PricingPage /></S> },
+        { path: "why-arali", element: <S><WhyArali /></S> },
+        { path: "story", element: <S><Story /></S> },
+        { path: "faq", element: <S><FAQ /></S> },
+        { path: "get-started", element: <S><GetStarted /></S> },
+        { path: "blog", element: <S><BlogList /></S> },
+        { path: "blog/:slug", element: <S><BlogPost /></S> },
+        { path: "*", element: <S><NotFound /></S> }
+      ]
+    },
+    {
+      path: "/dashboard",
+      element: (
+        <ProtectedRoute>
+          <S><DashboardLayout /></S>
+        </ProtectedRoute>
+      ),
+      errorElement: <ErrorPage />,
+      children: [
+        { index: true, element: <S><Dashboard /></S> },
+        { path: "pos", element: <S><POS /></S> },
+        { path: "inventory", element: <S><Inventory /></S> },
+        { path: "inventory/:productId", element: <S><ProductDetail /></S> },
+        { path: "notepad", element: <S><SmartSalesNotepad /></S> },
+        { path: "express", element: <S><SmartSalesNotepad /></S> },
+        { path: "purchase-notepad", element: <S><SmartPurchaseNotepad /></S> },
+        { path: "orders", element: <S><Orders /></S> },
+        { path: "customers", element: <S><Customers /></S> },
+        { path: "vendors", element: <S><Vendors /></S> },
+        { 
+          path: "analytics", 
+          element: (
+            <S><FeatureGuard 
+              feature="canViewReports" 
+              title="Analytics Locked" 
+              description="Gain deep insights into your business performance with advanced analytics."
+            >
+              <S><Analytics /></S>
+            </FeatureGuard></S>
+          ) 
+        },
+        { path: "revenue", element: <S><RevenueDetailed /></S> },
+        { 
+          path: "insights", 
+          element: (
+            <S><FeatureGuard 
+              feature="canForecast" 
+              title="AI Insights Locked" 
+              description="Predict trends and optimize inventory with AI-powered forecasting."
+            >
+              <S><AIInsights /></S>
+            </FeatureGuard></S>
+          ) 
+        },
+        { path: "settings", element: <S><DashboardSettings /></S> },
+        { path: "*", element: <S><NotFound /></S> }
+      ]
+    },
+    {
+      path: "*",
+      element: <S><NotFound /></S>
+    }
+  ]);
+}
 
 export default function App() {
+  // useMemo ensures the router is created once and stable across re-renders.
+  // Moving creation here (instead of module scope) prevents HMR from
+  // recreating the router instance and causing dynamic import errors.
+  const router = useMemo(() => createAppRouter(), []);
+
   return (
     <AuthProvider>
       <RouterProvider router={router} />
       <Toaster />
-      <PWAInstallPrompt />
-      <OfflineIndicator />
+      <S><PWAInstallPrompt /></S>
+      <S><OfflineIndicator /></S>
     </AuthProvider>
   );
 }

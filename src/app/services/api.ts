@@ -1,6 +1,6 @@
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { supabase } from './supabaseClient';
-import type { Product, Customer, Order, RevenueSource, Notification, Vendor, Purchase, Loss } from '../data/dashboardData';
+import type { Product, ProductVariant, Customer, Order, RevenueSource, Notification, Vendor, Purchase, Loss } from '../data/dashboardData';
 
 export interface DailyMission {
   id: string;
@@ -59,11 +59,17 @@ export const businessVerificationApi = {
     if (data.documentNumber) formData.append('documentNumber', data.documentNumber);
     if (data.file) formData.append('file', data.file);
 
+    const headers: Record<string, string> = {};
+    if (accessToken && accessToken.startsWith('access_')) {
+        headers['Authorization'] = `Bearer ${publicAnonKey}`;
+        headers['x-custom-auth-token'] = accessToken;
+    } else {
+        headers['Authorization'] = `Bearer ${accessToken || publicAnonKey}`;
+    }
+
     const response = await fetch(`${API_BASE_URL}/business/verify`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken || publicAnonKey}`,
-      },
+      headers,
       body: formData,
     });
 
@@ -91,13 +97,21 @@ const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
 
+// Guard against concurrent refresh attempts — stores the in-flight promise
+let refreshInProgress: Promise<string | null> | null = null;
+
 // Helper function to decode JWT and check if it's expired
-function isTokenExpired(token: string): boolean {
+// `silent` suppresses console output (used when the caller will handle logging)
+function isTokenExpired(token: string, silent = false): boolean {
   try {
+    if (token.startsWith('access_')) {
+      return false; // Custom tokens don't have JWT expiry structure
+    }
+
     // JWT format: header.payload.signature
     const parts = token.split('.');
     if (parts.length !== 3) {
-      console.error('Invalid JWT format');
+      if (!silent) console.error('Invalid JWT format');
       return true; // Treat invalid tokens as expired
     }
     
@@ -109,25 +123,9 @@ function isTokenExpired(token: string): boolean {
     const now = Date.now();
     const bufferMs = 5 * 60 * 1000; // 5 minute buffer
     
-    const isExpired = expiryTime <= now + bufferMs;
-    
-    if (isExpired) {
-      const msUntilExpiry = expiryTime - now;
-      const minutesUntilExpiry = Math.round(msUntilExpiry / 1000 / 60);
-      
-      if (msUntilExpiry > 0) {
-         // Expires soon (within buffer)
-         console.log(`Token expiring soon (in ${minutesUntilExpiry} minutes) - preemptive refresh`);
-      } else {
-         // Actually expired
-         const minutesAgo = Math.abs(minutesUntilExpiry);
-         console.warn(`Token expired ${minutesAgo} minutes ago`);
-      }
-    }
-    
-    return isExpired;
+    return expiryTime <= now + bufferMs;
   } catch (error) {
-    console.error('Error decoding JWT:', error);
+    if (!silent) console.error('Error decoding JWT:', error);
     return true; // Treat decode errors as expired
   }
 }
@@ -136,7 +134,38 @@ function isTokenExpired(token: string): boolean {
 export function clearTokenCache(): void {
   cachedToken = null;
   tokenExpiry = 0;
-  console.log('Token cache cleared');
+  refreshInProgress = null;
+}
+
+// Core refresh logic — extracted so it can be deduplicated
+async function doRefreshToken(): Promise<string | null> {
+  // 1. Try refreshSession first (handles expired refresh tokens internally)
+  try {
+    const { data: { session }, error } = await supabase.auth.refreshSession();
+    if (!error && session) {
+      cachedToken = session.access_token;
+      tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
+      localStorage.setItem('auth_token', session.access_token);
+      sessionStorage.setItem('access_token', session.access_token);
+      return session.access_token;
+    }
+  } catch (e) {
+    // refreshSession can throw on network errors; fall through to getSession
+  }
+
+  // 2. Fallback: getSession (may have a valid session from another tab)
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (!error && session && session.access_token && !isTokenExpired(session.access_token, true)) {
+      cachedToken = session.access_token;
+      tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
+      return session.access_token;
+    }
+  } catch (e) {
+    // getSession failed too
+  }
+
+  return null;
 }
 
 // Helper function to get access token for API requests
@@ -147,66 +176,30 @@ async function getAccessToken(): Promise<string | null> {
   }
   
   try {
-    // Check if we have a cached token that's still valid (with 5 minute buffer)
-    const now = Date.now();
-    const bufferMs = 5 * 60 * 1000; // 5 minutes buffer
-    
-    if (cachedToken && !isTokenExpired(cachedToken)) {
-      console.log('Using cached token (valid for', Math.round((tokenExpiry - now) / 1000 / 60), 'more minutes)');
+    // 1. Check for custom KV auth token first (starts with access_)
+    const storedToken = localStorage.getItem('auth_token');
+    if (storedToken && storedToken.startsWith('access_')) {
+        cachedToken = storedToken;
+        tokenExpiry = Date.now() + 86400000; // Assume valid for 24h
+        return storedToken;
+    }
+
+    // 2. Check cached JWT token — single call to isTokenExpired
+    if (cachedToken && !isTokenExpired(cachedToken, true)) {
       return cachedToken;
     }
 
-    // If we have a cached token but it's expired, explicitly try to refresh
-    if (cachedToken && isTokenExpired(cachedToken)) {
-      console.log('Cached token expired, refreshing session...');
-      const { data: { session }, error } = await supabase.auth.refreshSession();
-      if (!error && session) {
-        // Cache the refreshed token
-        cachedToken = session.access_token;
-        tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
-        localStorage.setItem('auth_token', session.access_token);
-        sessionStorage.setItem('access_token', session.access_token);
-        return session.access_token;
-      }
+    // 3. Token is missing or expired — refresh.
+    //    Deduplicate: if a refresh is already in-flight, piggyback on it.
+    if (refreshInProgress) {
+      return refreshInProgress;
     }
-    
-    // No cached token or refresh failed: Try to get existing session first
-    // This is crucial for initial load or after login where session exists in storage but not in memory cache
-    console.log('Getting current session...');
-    const { data: { session }, error } = await supabase.auth.getSession();
-    
-    if (error) {
-       console.error('Get session error:', error);
-       // Only if getSession fails do we consider forcing a refresh or signout
-       if (error.message?.includes('missing') || error.message?.includes('not found')) {
-         // Session genuinely missing
-         cachedToken = null;
-         return null;
-       }
-    }
-    
-    if (session && session.access_token) {
-       // Check if this retrieved session is expired
-       if (isTokenExpired(session.access_token)) {
-          console.log('Retrieved session token is expired, refreshing...');
-          const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession();
-          if (!refreshError && refreshedSession) {
-             cachedToken = refreshedSession.access_token;
-             tokenExpiry = refreshedSession.expires_at ? refreshedSession.expires_at * 1000 : 0;
-             localStorage.setItem('auth_token', refreshedSession.access_token);
-             sessionStorage.setItem('access_token', refreshedSession.access_token);
-             return refreshedSession.access_token;
-          }
-       } else {
-          // Session is valid
-          cachedToken = session.access_token;
-          tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
-          return session.access_token;
-       }
-    }
-    
-    // If we get here, we really don't have a valid session
-    return null;
+
+    refreshInProgress = doRefreshToken().finally(() => {
+      refreshInProgress = null;
+    });
+
+    return refreshInProgress;
 
   } catch (error) {
     console.error('Error retrieving access token:', error);
@@ -233,22 +226,75 @@ async function apiRequest<T>(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
+    // Prepare headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((options.headers as Record<string, string>) || {}),
+    };
+
+    // Handle Custom Auth Tokens
+    if (accessToken && accessToken.startsWith('access_')) {
+        headers['Authorization'] = `Bearer ${publicAnonKey}`;
+        headers['x-custom-auth-token'] = accessToken;
+    } else {
+        headers['Authorization'] = `Bearer ${accessToken || publicAnonKey}`;
+    }
+
     try {
       const response = await fetch(url, {
         ...options,
         signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken || publicAnonKey}`,
-          ...options.headers,
-        },
+        headers,
       });
 
       // Handle 401 Unauthorized - token might be expired, try to refresh
       if (response.status === 401 && retryCount === 0) {
         console.log('Received 401, attempting to refresh session and retry...');
         
-        // Force refresh the session
+        // For KV auth users (custom phone auth), try refreshing the token first
+        const storedToken = localStorage.getItem('auth_token');
+        if (storedToken && storedToken.startsWith('access_')) {
+          console.log('[API] KV auth token rejected (401). Attempting token refresh...');
+          try {
+            const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh-token`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${publicAnonKey}`,
+              },
+              body: JSON.stringify({ token: storedToken }),
+            });
+
+            if (refreshRes.ok) {
+              const refreshData = await refreshRes.json();
+              const newToken = refreshData.session?.access_token;
+              if (newToken) {
+                console.log('[API] KV token refreshed successfully');
+                localStorage.setItem('auth_token', newToken);
+                sessionStorage.setItem('access_token', newToken);
+                cachedToken = newToken;
+                tokenExpiry = 0; // Reset — KV tokens don't have JWT expiry
+                // Retry the original request with the new token
+                return apiRequest<T>(endpoint, options, retryCount + 1);
+              }
+            }
+            
+            // Refresh failed — redirect to login
+            console.warn('[API] KV token refresh failed. Redirecting to login.');
+          } catch (refreshErr) {
+            console.error('[API] Token refresh request failed:', refreshErr);
+          }
+
+          // If we get here, refresh didn't work
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('user');
+          sessionStorage.removeItem('access_token');
+          clearTokenCache();
+          window.location.href = '/login';
+          throw new Error('Session expired. Please log in again.');
+        }
+
+        // For Supabase auth users, try refreshing the session
         const { data: { session }, error } = await supabase.auth.refreshSession();
         
         if (error || !session) {
@@ -257,6 +303,7 @@ async function apiRequest<T>(
           localStorage.removeItem('auth_token');
           localStorage.removeItem('user');
           sessionStorage.removeItem('access_token');
+          clearTokenCache();
           window.location.href = '/login';
           throw new Error('Session expired. Please log in again.');
         }
@@ -428,6 +475,64 @@ export const productsApi = {
   getLosses: async (): Promise<Loss[]> => {
     const data = await apiRequest<{ losses: Loss[] }>('/losses');
     return data.losses;
+  },
+};
+
+// ========================================
+// VARIANTS API
+// ========================================
+
+export const variantsApi = {
+  // Get all active variants for a product
+  getAll: async (productId: number): Promise<{ variants: ProductVariant[]; baseUnit: string }> => {
+    return await apiRequest<{ variants: ProductVariant[]; baseUnit: string }>(`/products/${productId}/variants`);
+  },
+
+  // Add a variant to a product
+  add: async (productId: number, variant: Partial<ProductVariant> & { baseUnit?: string }): Promise<{ variant: ProductVariant; product: Product }> => {
+    return await apiRequest<{ variant: ProductVariant; product: Product }>(`/products/${productId}/variants`, {
+      method: 'POST',
+      body: JSON.stringify(variant),
+    });
+  },
+
+  // Update a variant
+  update: async (productId: number, variantId: string, updates: Partial<ProductVariant>): Promise<{ variant: ProductVariant; product: Product }> => {
+    return await apiRequest<{ variant: ProductVariant; product: Product }>(`/products/${productId}/variants/${variantId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  },
+
+  // Soft-delete a variant
+  delete: async (productId: number, variantId: string): Promise<{ success: boolean; product: Product }> => {
+    return await apiRequest<{ success: boolean; product: Product }>(`/products/${productId}/variants/${variantId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Restock a variant
+  restock: async (productId: number, variantId: string, quantity: number, unitLabel?: string): Promise<{ variant: ProductVariant; product: Product }> => {
+    return await apiRequest<{ variant: ProductVariant; product: Product }>(`/products/${productId}/variants/${variantId}/restock`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity, unitLabel }),
+    });
+  },
+
+  // Sell from a variant
+  sell: async (productId: number, variantId: string, quantity?: number, looseQuantityInBaseUnit?: number): Promise<{ variant: ProductVariant; product: Product; revenue: number }> => {
+    return await apiRequest<{ variant: ProductVariant; product: Product; revenue: number }>(`/products/${productId}/variants/${variantId}/sell`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity, looseQuantityInBaseUnit }),
+    });
+  },
+
+  // Migrate a product to the variant system
+  migrate: async (productId: number, baseUnit?: string): Promise<{ product: Product }> => {
+    return await apiRequest<{ product: Product }>(`/products/${productId}/migrate-variants`, {
+      method: 'POST',
+      body: JSON.stringify({ baseUnit }),
+    });
   },
 };
 
@@ -703,11 +808,17 @@ export const shopSettingsApi = {
     const formData = new FormData();
     formData.append('file', file);
 
+    const headers: Record<string, string> = {};
+    if (accessToken && accessToken.startsWith('access_')) {
+        headers['Authorization'] = `Bearer ${publicAnonKey}`;
+        headers['x-custom-auth-token'] = accessToken;
+    } else {
+        headers['Authorization'] = `Bearer ${accessToken || publicAnonKey}`;
+    }
+
     const response = await fetch(`${API_BASE_URL}/shop-settings/logo`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken || publicAnonKey}`,
-      },
+      headers,
       body: formData,
     });
 
@@ -799,11 +910,16 @@ export const expressApi = {
     });
   },
 
-  // Record express sale
-  recordSale: async (productId: number, quantity: number = 1): Promise<{ success: boolean; transactionId: string; newStock: number }> => {
-    return await apiRequest<{ success: boolean; transactionId: string; newStock: number }>('/express/sale', {
+  // Record express sale (supports legacy + variant-based)
+  recordSale: async (
+    productId: number,
+    quantity: number = 1,
+    variantId?: string,
+    looseQuantityInBaseUnit?: number
+  ): Promise<{ success: boolean; transactionId: string; newStock: number; variant?: ProductVariant; product?: Product }> => {
+    return await apiRequest<{ success: boolean; transactionId: string; newStock: number; variant?: ProductVariant; product?: Product }>('/express/sale', {
       method: 'POST',
-      body: JSON.stringify({ productId, quantity }),
+      body: JSON.stringify({ productId, quantity, variantId, looseQuantityInBaseUnit }),
     });
   },
 

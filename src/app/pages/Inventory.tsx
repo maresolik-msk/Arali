@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'motion/react';
-import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon, ScanLine, Download, Calendar, ChevronDown } from 'lucide-react';
+import { Package, Plus, Search, CircleAlert, Edit2, PackagePlus, ShoppingCart, Bell, Trash2, Sparkles, Loader2, Image as ImageIcon, ScanLine, Download, Calendar, ChevronDown, Layers } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -18,6 +18,8 @@ import { VoiceInput } from '../components/VoiceInput';
 import { usePlan } from '../hooks/usePlan';
 import { UpgradeModal } from '../components/UpgradeModal';
 import type { Product, Vendor, Loss } from '../data/dashboardData';
+import { KiranaCatalog } from '../components/KiranaCatalog';
+import { VariantManager } from '../components/VariantManager';
 
 // Milk product image from Unsplash
 const MILK_IMAGE_URL = "https://images.unsplash.com/photo-1635436338433-89747d0ca0ef?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaWxrJTIwYm90dGxlJTIwZGFpcnl8ZW58MXx8fHwxNzY4MDYyNzY2fDA&ixlib=rb-4.1.0&q=80&w=1080";
@@ -96,6 +98,10 @@ export function Inventory() {
   const { checkLimit, isFree, isStarter, limits } = usePlan();
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [upgradeMessage, setUpgradeMessage] = useState('');
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [variantProduct, setVariantProduct] = useState<Product | null>(null);
+  const [isVariantManagerOpen, setIsVariantManagerOpen] = useState(false);
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
 
   // Load products from backend on mount
   useEffect(() => {
@@ -1057,9 +1063,9 @@ export function Inventory() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F5F9FC] via-[#EBF4FA] to-[#F5F9FC]">
+    <div className="min-h-screen bg-gradient-to-br from-[#F5F9FC] via-[#EBF4FA] to-[#F5F9FC] overflow-x-hidden">
       <motion.div
-        className="p-6 md:p-8 space-y-8"
+        className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-full"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -1070,152 +1076,347 @@ export function Inventory() {
             
             <p className="text-muted-foreground">Manage your products and stock levels</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button 
               variant="outline"
+              size="sm"
               className="border-red-500 text-red-500 hover:bg-red-50 rounded-full shadow-lg flex"
               onClick={handleViewLosses}
             >
-              <CircleAlert className="w-4 h-4 mr-2" />
+              <CircleAlert className="w-4 h-4 mr-1.5" />
               Losses
             </Button>
             <Button 
               variant="outline"
+              size="sm"
               className="border-[#0F4C81] text-[#0F4C81] hover:bg-[#0F4C81]/10 rounded-full shadow-lg hidden md:flex"
               onClick={handleAutoGenerateImages}
               disabled={isGeneratingImage}
             >
-              <Sparkles className="w-4 h-4 mr-2" />
+              <Sparkles className="w-4 h-4 mr-1.5" />
               Auto-fill Images
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-[#0F4C81] text-[#0F4C81] hover:bg-[#0F4C81]/10 rounded-full shadow-lg"
+              onClick={() => setIsCatalogOpen(true)}
+            >
+              <ShoppingCart className="w-4 h-4 mr-1.5" />
+              <span className="hidden sm:inline">Quick Add from</span> Catalog
+            </Button>
             <Button 
+              size="sm"
               className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white rounded-full shadow-lg shadow-[#0F4C81]/20" 
               onClick={() => setIsAddDialogOpen(true)}
             >
-              <Plus className="w-4 h-4 mr-2" />
+              <Plus className="w-4 h-4 mr-1.5" />
               Add Product
             </Button>
           </div>
         </div>
 
         {/* Search and Filters */}
-        <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg">
-          
+        <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-3 md:p-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search products by name or SKU..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-10 bg-white border-[#0F4C81]/15 focus:border-[#0F4C81]"
+            />
+          </div>
         </Card>
 
+        {/* Empty State — show catalog CTA when inventory is empty */}
+        {!isLoading && inventoryItems.length === 0 && (
+          <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg p-8 text-center">
+            <div className="max-w-sm mx-auto space-y-4">
+              <div className="w-16 h-16 rounded-full bg-[#0F4C81]/10 flex items-center justify-center mx-auto">
+                <ShoppingCart className="w-8 h-8 text-[#0F4C81]" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Your inventory is empty</h3>
+              <p className="text-sm text-gray-500">
+                Get started quickly by adding products from our pre-built Kirana catalog with prices, categories, and images already filled in.
+              </p>
+              <Button
+                onClick={() => setIsCatalogOpen(true)}
+                className="bg-[#0F4C81] hover:bg-[#0d3f6a] text-white rounded-full px-6 shadow-lg"
+              >
+                <ShoppingCart className="w-4 h-4 mr-2" />
+                Browse Kirana Catalog
+              </Button>
+              <p className="text-xs text-gray-400">
+                Or <button onClick={() => setIsAddDialogOpen(true)} className="text-[#0F4C81] underline font-medium">add a product manually</button>
+              </p>
+            </div>
+          </Card>
+        )}
+
         {/* Inventory Table */}
-        <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none" />
-          <div className="relative overflow-x-auto">
-            <table className="w-full">
+        <Card className="bg-white/80 backdrop-blur-xl border border-[#0F4C81]/10 shadow-lg overflow-hidden relative">
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-transparent pointer-events-none z-0" />
+          <div className="relative z-10 overflow-x-auto">
+            <table className="w-full min-w-[640px]">
               <thead className="bg-[#0F4C81]/5">
                 <tr className="border-b border-[#0F4C81]/10">
-                  <th className="text-left py-4 px-6 text-foreground">Product Name</th>
-                  <th className="text-left py-4 px-6 text-foreground">SKU</th>
-                  <th className="text-left py-4 px-6 text-foreground">Category</th>
-                  <th className="text-left py-4 px-6 text-foreground">Stock</th>
-                  <th className="text-left py-4 px-6 text-foreground">Price</th>
-                  <th className="text-left py-4 px-6 text-foreground">Margin</th>
-                  <th className="text-left py-4 px-6 text-foreground">Status</th>
-                  <th className="text-left py-4 px-6 text-foreground">Actions</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm">Product</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm hidden lg:table-cell">SKU</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm hidden md:table-cell">Category</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm">Stock</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm">Price</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm hidden lg:table-cell">Margin</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm">Status</th>
+                  <th className="text-left py-3 px-3 md:px-4 text-foreground text-sm">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item, index) => {
-                  const sellingPrice = typeof item.price === 'number' ? item.price : parseFloat(item.price.replace(/[^0-9.]/g, '') || '0');
-                  const costPrice = item.costPrice || 0;
-                  const margin = sellingPrice > 0 ? ((sellingPrice - costPrice) / sellingPrice * 100).toFixed(0) : '0';
-                  const marginVal = parseFloat(margin);
-                  let marginColor = 'bg-gray-100 text-gray-600';
-                  if (marginVal >= 40) marginColor = 'bg-green-100 text-green-700';
-                  else if (marginVal >= 20) marginColor = 'bg-yellow-100 text-yellow-700';
-                  else marginColor = 'bg-red-100 text-red-700';
+                {filteredItems.flatMap((item, index) => {
+                  const activeVars = (item.variants || []).filter((v: any) => v.isActive !== false);
+                  const isVarProduct = item.hasVariants && activeVars.length > 0;
 
-                  return (
+                  // Compute variant-aware display values
+                  let priceDisplay: React.ReactNode;
+                  let stockDisplay: React.ReactNode;
+                  let stockNumForStatus: number;
+                  let marginDisplay: React.ReactNode;
+
+                  if (isVarProduct) {
+                    // Price range from variants
+                    const prices = activeVars.map((v: any) => v.sellingPrice).sort((a: number, b: number) => a - b);
+                    const priceText = prices.length === 1
+                      ? `₹${prices[0]}`
+                      : `₹${prices[0]}–₹${prices[prices.length - 1]}`;
+                    priceDisplay = <span className="text-purple-700 font-medium text-xs">{priceText}</span>;
+
+                    // Total stock in base units across all active variants
+                    const totalBaseStock = activeVars.reduce((sum: number, v: any) => sum + (v.stockInBaseUnit || 0), 0);
+                    const unitType = activeVars[0]?.unitType || 'count';
+                    const baseLabel = unitType === 'weight' ? 'g' : unitType === 'volume' ? 'ml' : 'pcs';
+                    let stockText: string;
+                    if (unitType === 'weight' && totalBaseStock >= 1000) {
+                      stockText = `${(totalBaseStock / 1000).toFixed(1)} kg`;
+                    } else if (unitType === 'volume' && totalBaseStock >= 1000) {
+                      stockText = `${(totalBaseStock / 1000).toFixed(1)} L`;
+                    } else {
+                      stockText = `${totalBaseStock} ${baseLabel}`;
+                    }
+                    stockNumForStatus = totalBaseStock;
+                    stockDisplay = (
+                      <div className="flex items-center gap-1">
+                        {totalBaseStock === 0 && <CircleAlert className="w-3.5 h-3.5 text-red-600" />}
+                        <span className="text-purple-700 font-medium text-sm">{stockText}</span>
+                        <span className="text-[9px] text-gray-400">total</span>
+                      </div>
+                    );
+
+                    // Margin range from variants
+                    const margins = activeVars
+                      .filter((v: any) => v.sellingPrice > 0 && v.costPrice > 0)
+                      .map((v: any) => ((v.sellingPrice - v.costPrice) / v.sellingPrice * 100));
+                    if (margins.length > 0) {
+                      const minM = Math.min(...margins).toFixed(0);
+                      const maxM = Math.max(...margins).toFixed(0);
+                      const avgM = margins.reduce((a: number, b: number) => a + b, 0) / margins.length;
+                      let mColor = 'bg-gray-100 text-gray-600';
+                      if (avgM >= 40) mColor = 'bg-green-100 text-green-700';
+                      else if (avgM >= 20) mColor = 'bg-yellow-100 text-yellow-700';
+                      else mColor = 'bg-red-100 text-red-700';
+                      marginDisplay = (
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${mColor}`}>
+                          {minM === maxM ? `${minM}%` : `${minM}–${maxM}%`}
+                        </span>
+                      );
+                    } else {
+                      marginDisplay = <span className="text-muted-foreground text-xs">-</span>;
+                    }
+                  } else {
+                    // Legacy / non-variant product
+                    const sellingPrice = typeof item.price === 'number' ? item.price : parseFloat(String(item.price).replace(/[^0-9.]/g, '') || '0');
+                    const costPrice = item.costPrice || 0;
+                    priceDisplay = <span>₹{sellingPrice.toFixed(0)}</span>;
+                    stockNumForStatus = item.stock;
+                    stockDisplay = (
+                      <div className="flex items-center gap-1">
+                        {item.stock < 10 && item.stock > 0 && <CircleAlert className="w-3.5 h-3.5 text-yellow-600" />}
+                        {item.stock === 0 && <CircleAlert className="w-3.5 h-3.5 text-red-600" />}
+                        <span className="text-foreground text-sm">{item.stock}</span>
+                      </div>
+                    );
+                    const margin = sellingPrice > 0 ? ((sellingPrice - costPrice) / sellingPrice * 100).toFixed(0) : '0';
+                    const marginVal = parseFloat(margin);
+                    let marginColor = 'bg-gray-100 text-gray-600';
+                    if (marginVal >= 40) marginColor = 'bg-green-100 text-green-700';
+                    else if (marginVal >= 20) marginColor = 'bg-yellow-100 text-yellow-700';
+                    else marginColor = 'bg-red-100 text-red-700';
+                    marginDisplay = costPrice > 0 ? (
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${marginColor}`}>
+                        {margin}%
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">-</span>
+                    );
+                  }
+
+                  // Status based on variant-aware stock
+                  const statusThreshold = isVarProduct ? 0 : item.threshold;
+
+                  const rows: React.ReactNode[] = [];
+                  rows.push(
                   <tr 
-                    key={`${item.id}-${index}`}
+                    key={`product-${item.id}-${index}`}
                     className="border-b border-[#0F4C81]/5 hover:bg-[#0F4C81]/5 transition-colors"
                   >
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#0F4C81]/10 flex items-center justify-center overflow-hidden">
+                    <td className="py-3 px-3 md:px-4">
+                      <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                        <div className="w-8 h-8 md:w-10 md:h-10 rounded-xl bg-[#0F4C81]/10 flex items-center justify-center overflow-hidden flex-shrink-0">
                           {item.imageUrl ? (
                             <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                           ) : (
-                            <Package className="w-5 h-5 text-[#0F4C81]" />
+                            <Package className="w-4 h-4 md:w-5 md:h-5 text-[#0F4C81]" />
                           )}
                         </div>
-                        <button
-                          onClick={() => navigate(`/dashboard/inventory/${item.id}`)}
-                          className="text-foreground hover:text-[#0F4C81] hover:underline transition-colors text-left"
-                        >
-                          {item.name}
-                        </button>
+                        <div className="min-w-0">
+                          <button
+                            onClick={() => navigate(`/dashboard/inventory/${item.id}`)}
+                            className="text-foreground hover:text-[#0F4C81] hover:underline transition-colors text-left text-sm truncate max-w-[120px] md:max-w-[200px] block"
+                          >
+                            {item.name}
+                          </button>
+                          {isVarProduct && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setExpandedProductId(expandedProductId === item.id ? null : item.id); }}
+                              className="text-[10px] text-purple-600 font-medium flex items-center gap-0.5 mt-0.5 hover:text-purple-800"
+                            >
+                              <Layers className="w-3 h-3" />
+                              {activeVars.length} variant{activeVars.length > 1 ? 's' : ''}
+                              <ChevronDown className={`w-3 h-3 transition-transform ${expandedProductId === item.id ? 'rotate-180' : ''}`} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </td>
-                    <td className="py-4 px-6 text-muted-foreground">{item.sku}</td>
-                    <td className="py-4 px-6 text-muted-foreground">{item.category}</td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-2">
-                        {item.stock < 10 && item.stock > 0 && (
-                          <CircleAlert className="w-4 h-4 text-yellow-600" />
-                        )}
-                        {item.stock === 0 && (
-                          <CircleAlert className="w-4 h-4 text-red-600" />
-                        )}
-                        <span className="text-foreground">{item.stock}</span>
-                      </div>
+                    <td className="py-3 px-3 md:px-4 text-muted-foreground text-sm hidden lg:table-cell">{item.sku}</td>
+                    <td className="py-3 px-3 md:px-4 text-muted-foreground text-sm hidden md:table-cell">{item.category}</td>
+                    <td className="py-3 px-3 md:px-4">
+                      {stockDisplay}
                     </td>
-                    <td className="py-4 px-6 text-foreground">₹{sellingPrice.toFixed(2)}</td>
-                    <td className="py-4 px-6">
-                       {costPrice > 0 ? (
-                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${marginColor}`}>
-                               {margin}%
-                           </span>
-                       ) : (
-                           <span className="text-muted-foreground text-xs">-</span>
-                       )}
+                    <td className="py-3 px-3 md:px-4 text-foreground text-sm whitespace-nowrap">{priceDisplay}</td>
+                    <td className="py-3 px-3 md:px-4 hidden lg:table-cell">
+                      {marginDisplay}
                     </td>
-                    <td className="py-4 px-6">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${getStatusColor(getStatus(item.stock, item.threshold))}`}>
-                        {getStatus(item.stock, item.threshold)}
+                    <td className="py-3 px-3 md:px-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${getStatusColor(getStatus(stockNumForStatus, statusThreshold))}`}>
+                        {getStatus(stockNumForStatus, statusThreshold)}
                       </span>
                     </td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-2">
+                    <td className="py-3 px-3 md:px-4">
+                      <div className="flex items-center gap-1">
                         <Button 
                           size="sm"
                           variant="outline"
-                          className="border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5"
+                          className="border-[#0F4C81]/20 text-[#0F4C81] hover:bg-[#0F4C81]/5 h-7 w-7 p-0"
                           onClick={() => handleEditClick(item)}
+                          title="Edit"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="w-3.5 h-3.5" />
                         </Button>
                         <Button 
                           size="sm"
-                          className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white"
+                          variant="outline"
+                          className="border-purple-300 text-purple-600 hover:bg-purple-50 h-7 w-7 p-0"
+                          onClick={() => { setVariantProduct(item); setIsVariantManagerOpen(true); }}
+                          title="Manage Variants"
+                        >
+                          <Layers className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button 
+                          size="sm"
+                          className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white h-7 px-2 text-xs"
                           onClick={() => handleRestockClick(item)}
                         >
-                          Restock
+                          <PackagePlus className="w-3.5 h-3.5 md:mr-1" />
+                          <span className="hidden md:inline">Restock</span>
                         </Button>
                         <Button 
                           size="sm"
-                          className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white"
+                          className="bg-[#0F4C81] hover:bg-[#0F4C81]/90 text-white h-7 px-2 text-xs hidden sm:flex"
                           onClick={() => handleRecordSalesClick(item)}
                         >
-                          Record Sales
+                          <Download className="w-3.5 h-3.5 md:mr-1" />
+                          <span className="hidden lg:inline">Sales</span>
                         </Button>
                         <Button 
                           size="sm"
-                          className="bg-red-500 hover:bg-red-600 text-white"
+                          className="bg-red-500 hover:bg-red-600 text-white h-7 w-7 p-0"
                           onClick={() => handleDeleteClick(item)}
+                          title="Delete"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
                     </td>
                   </tr>
                   );
+                  {/* Expanded Variant Rows */}
+                  if (expandedProductId === item.id && item.variants && item.variants.filter((v: any) => v.isActive !== false).length > 0) {
+                    item.variants.filter((v: any) => v.isActive !== false).forEach((variant: any) => {
+                      const unitType = variant.unitType || 'count';
+                      const baseLabel = unitType === 'weight' ? 'g' : unitType === 'volume' ? 'ml' : 'pcs';
+                      const stockBase = variant.stockInBaseUnit || 0;
+                      const stockDisplay = unitType === 'weight' && stockBase >= 1000
+                        ? `${(stockBase / 1000).toFixed(2)} kg`
+                        : unitType === 'volume' && stockBase >= 1000
+                          ? `${(stockBase / 1000).toFixed(2)} L`
+                          : `${stockBase} ${baseLabel}`;
+                      const packLabel = variant.isLoose
+                        ? 'Loose'
+                        : unitType === 'weight' && variant.packSizeInBaseUnit >= 1000
+                          ? `${variant.packSizeInBaseUnit / 1000} kg`
+                          : unitType === 'volume' && variant.packSizeInBaseUnit >= 1000
+                            ? `${variant.packSizeInBaseUnit / 1000} L`
+                            : `${variant.packSizeInBaseUnit} ${baseLabel}`;
+                      const packs = variant.isLoose ? '-' : Math.floor(stockBase / (variant.packSizeInBaseUnit || 1));
+
+                      rows.push(
+                        <tr key={`variant-${item.id}-${variant.id}`} className="bg-purple-50/50 border-b border-purple-100/50">
+                          <td className="py-2 px-3 md:px-4 pl-10 md:pl-16">
+                            <div className="flex items-center gap-2 text-xs">
+                              <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${variant.isLoose ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600'}`}>
+                                <Layers className="w-3 h-3" />
+                              </div>
+                              <span className="text-gray-700 font-medium truncate">{variant.variantName}</span>
+                              {variant.isLoose && (
+                                <span className="text-[9px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">Loose</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 md:px-4 text-xs text-gray-500 hidden lg:table-cell">{packLabel}</td>
+                          <td className="py-2 px-3 md:px-4 text-xs text-gray-500 hidden md:table-cell">{variant.unitType}</td>
+                          <td className="py-2 px-3 md:px-4">
+                            <div className="text-xs">
+                              <span className="text-gray-700 font-medium">{stockDisplay}</span>
+                              {!variant.isLoose && <span className="text-gray-400 ml-1">({packs} packs)</span>}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 md:px-4 text-xs text-green-700 font-medium">₹{variant.sellingPrice}</td>
+                          <td className="py-2 px-3 md:px-4 hidden lg:table-cell">
+                            {variant.costPrice > 0 ? (
+                              <span className="text-xs text-gray-500">Cost: ₹{variant.costPrice}</span>
+                            ) : (
+                              <span className="text-xs text-gray-400">-</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 md:px-4" colSpan={2}>
+                            <span className="text-[10px] text-gray-400">MRP: ₹{variant.mrp}</span>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  }
+
+                  return rows;
                 })}
               </tbody>
             </table>
@@ -1953,6 +2154,28 @@ export function Inventory() {
         isOpen={isUpgradeModalOpen}
         onClose={() => setIsUpgradeModalOpen(false)}
         description={upgradeMessage}
+      />
+
+      {/* Variant Manager */}
+      {variantProduct && (
+        <VariantManager
+          product={variantProduct}
+          isOpen={isVariantManagerOpen}
+          onClose={() => { setIsVariantManagerOpen(false); setVariantProduct(null); }}
+          onProductUpdated={(updatedProduct) => {
+            setInventoryItems(prev => prev.map(p => p.id === updatedProduct.id ? { ...p, ...updatedProduct } : p));
+          }}
+        />
+      )}
+
+      {/* Kirana Catalog - Quick Add */}
+      <KiranaCatalog
+        isOpen={isCatalogOpen}
+        onClose={() => setIsCatalogOpen(false)}
+        existingProducts={inventoryItems}
+        onProductsAdded={(newProducts) => {
+          setInventoryItems(prev => [...prev, ...newProducts]);
+        }}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { motion } from 'motion/react';
-import { ArrowLeft, Package, TrendingUp, AlertCircle, Calendar, DollarSign, Edit2, Trash2, ShoppingCart, PackagePlus, ChevronDown, Sparkles, Loader2, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Package, TrendingUp, AlertCircle, Calendar, DollarSign, Edit2, Trash2, ShoppingCart, PackagePlus, ChevronDown, Sparkles, Loader2, Image as ImageIcon, Layers, Scale, Droplets, Hash } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -11,10 +11,11 @@ import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { toast } from 'sonner';
-import { productsApi } from '../services/api';
-import type { Product } from '../data/dashboardData';
+import { productsApi, variantsApi } from '../services/api';
+import type { Product, ProductVariant } from '../data/dashboardData';
 import { AIProductHelper } from '../components/ai/AIProductHelper';
 import { generateProductImage } from '../services/ai';
+import { VariantManager } from '../components/VariantManager';
 
 export function ProductDetail() {
   const { productId } = useParams<{ productId: string }>();
@@ -29,6 +30,10 @@ export function ProductDetail() {
   const [isAdjustStockDialogOpen, setIsAdjustStockDialogOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [movements, setMovements] = useState<any[]>([]);
+  const [isVariantManagerOpen, setIsVariantManagerOpen] = useState(false);
+  const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [variantsBaseUnit, setVariantsBaseUnit] = useState('pcs');
+  const [isLoadingVariants, setIsLoadingVariants] = useState(false);
   
   const [editingProduct, setEditingProduct] = useState<{
     id: number;
@@ -68,8 +73,9 @@ export function ProductDetail() {
   useEffect(() => {
     if (product) {
       loadMovements();
+      loadVariants();
     }
-  }, [product]);
+  }, [product?.id]);
 
   const loadMovements = async () => {
     if (!product) return;
@@ -78,6 +84,21 @@ export function ProductDetail() {
       setMovements(history);
     } catch (e) {
       console.error("Failed to load history", e);
+    }
+  };
+
+  const loadVariants = async () => {
+    if (!product) return;
+    setIsLoadingVariants(true);
+    try {
+      const data = await variantsApi.getAll(product.id);
+      setVariants((data.variants || []).filter((v: any) => v.isActive !== false));
+      setVariantsBaseUnit(data.baseUnit || 'pcs');
+    } catch (e) {
+      console.error("Failed to load variants:", e);
+      setVariants([]);
+    } finally {
+      setIsLoadingVariants(false);
     }
   };
 
@@ -237,7 +258,7 @@ export function ProductDetail() {
         return;
       }
 
-      const updatedProduct = await productsApi.recordSale(product.id, quantity);
+      const updatedProduct = await productsApi.recordSales(product.id, quantity);
       setProduct(updatedProduct);
       setIsRecordSalesDialogOpen(false);
       setSalesQuantity('');
@@ -285,9 +306,56 @@ export function ProductDetail() {
     return null;
   }
 
-  const stockStatus = getStockStatus(product.stock, product.threshold);
-  const profitMargin = ((product.sellingPrice - product.costPrice) / product.sellingPrice * 100).toFixed(1);
-  const marginValue = parseFloat(profitMargin);
+  // Variant-aware computed values
+  const activeVars = variants.filter(v => v.isActive !== false);
+  const isVarProduct = product.hasVariants && activeVars.length > 0;
+
+  const effectiveStock = isVarProduct
+    ? activeVars.reduce((sum, v) => sum + (v.stockInBaseUnit || 0), 0)
+    : product.stock;
+  const effectiveStockLabel = (() => {
+    if (!isVarProduct) return `${product.stock} units`;
+    const unitType = activeVars[0]?.unitType || 'count';
+    if (unitType === 'weight' && effectiveStock >= 1000) return `${(effectiveStock / 1000).toFixed(1)} kg`;
+    if (unitType === 'volume' && effectiveStock >= 1000) return `${(effectiveStock / 1000).toFixed(1)} L`;
+    const baseLabel = unitType === 'weight' ? 'g' : unitType === 'volume' ? 'ml' : 'pcs';
+    return `${effectiveStock} ${baseLabel}`;
+  })();
+  const stockStatus = isVarProduct
+    ? getStockStatus(effectiveStock, 0)
+    : getStockStatus(product.stock, product.threshold);
+
+  // Pricing
+  let sellingPriceDisplay: string;
+  let costPriceDisplay: string;
+  let profitMargin: string;
+  let marginValue: number;
+
+  if (isVarProduct) {
+    const prices = activeVars.map(v => v.sellingPrice).sort((a, b) => a - b);
+    sellingPriceDisplay = prices.length === 1 ? `₹${prices[0]}` : `₹${prices[0]}–₹${prices[prices.length - 1]}`;
+    const costs = activeVars.map(v => v.costPrice).filter(c => c > 0).sort((a, b) => a - b);
+    costPriceDisplay = costs.length === 0 ? '–' : costs.length === 1 ? `₹${costs[0]}` : `₹${costs[0]}–₹${costs[costs.length - 1]}`;
+    const margins = activeVars
+      .filter(v => v.sellingPrice > 0 && v.costPrice > 0)
+      .map(v => ((v.sellingPrice - v.costPrice) / v.sellingPrice * 100));
+    if (margins.length > 0) {
+      const avgMargin = margins.reduce((a, b) => a + b, 0) / margins.length;
+      profitMargin = avgMargin.toFixed(1);
+      marginValue = avgMargin;
+    } else {
+      profitMargin = '0.0';
+      marginValue = 0;
+    }
+  } else {
+    sellingPriceDisplay = `₹${product.sellingPrice}`;
+    costPriceDisplay = `₹${product.costPrice}`;
+    profitMargin = product.sellingPrice > 0
+      ? ((product.sellingPrice - product.costPrice) / product.sellingPrice * 100).toFixed(1)
+      : '0.0';
+    marginValue = parseFloat(profitMargin);
+  }
+
   let marginColor = 'text-gray-900';
   let marginLabel = '';
   if (marginValue >= 40) { marginColor = 'text-green-600'; marginLabel = '(High)'; }
@@ -383,6 +451,14 @@ export function ProductDetail() {
                   <AlertCircle className="w-4 h-4 mr-2" />
                   Adjust Stock
                 </Button>
+                <Button
+                  onClick={() => setIsVariantManagerOpen(true)}
+                  variant="outline"
+                  className="w-full border-purple-300 text-purple-600 hover:bg-purple-50"
+                >
+                  <Layers className="w-4 h-4 mr-2" />
+                  Manage Variants
+                </Button>
               </div>
             </Card>
           </motion.div>
@@ -408,7 +484,10 @@ export function ProductDetail() {
                 </div>
                 <div>
                   <p className="text-gray-500 text-sm mb-1">Current Stock</p>
-                  <p className="text-gray-900 font-medium">{product.stock} units</p>
+                  <p className="text-gray-900 font-medium">{effectiveStockLabel}</p>
+                  {isVarProduct && (
+                    <p className="text-[10px] text-purple-500 mt-0.5">across {activeVars.length} variant{activeVars.length > 1 ? 's' : ''}</p>
+                  )}
                 </div>
                 <div>
                   <p className="text-gray-500 text-sm mb-1">Threshold</p>
@@ -439,21 +518,27 @@ export function ProductDetail() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <DollarSign className="w-4 h-4 text-gray-400" />
-                    <p className="text-gray-500 text-sm">Selling Price</p>
+                    <p className="text-gray-500 text-sm">Selling Price{isVarProduct ? ' (Range)' : ''}</p>
                   </div>
-                  <p className="text-gray-900 font-medium">₹{product.sellingPrice}</p>
+                  <p className="text-gray-900 font-medium">{sellingPriceDisplay}</p>
+                  {isVarProduct && (
+                    <p className="text-[10px] text-purple-500 mt-0.5">per variant</p>
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <DollarSign className="w-4 h-4 text-gray-400" />
-                    <p className="text-gray-500 text-sm">Cost Price</p>
+                    <p className="text-gray-500 text-sm">Cost Price{isVarProduct ? ' (Range)' : ''}</p>
                   </div>
-                  <p className="text-gray-900 font-medium">₹{product.costPrice}</p>
+                  <p className="text-gray-900 font-medium">{costPriceDisplay}</p>
+                  {isVarProduct && (
+                    <p className="text-[10px] text-purple-500 mt-0.5">per variant</p>
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <TrendingUp className="w-4 h-4 text-gray-400" />
-                    <p className="text-gray-500 text-sm">Profit Margin</p>
+                    <p className="text-gray-500 text-sm">{isVarProduct ? 'Avg Margin' : 'Profit Margin'}</p>
                   </div>
                   <div className="flex items-baseline gap-2">
                     <p className={`text-xl font-bold ${marginColor}`}>{profitMargin}%</p>
@@ -468,6 +553,101 @@ export function ProductDetail() {
                   <p className="text-gray-900 font-medium">₹{product.revenue.toLocaleString('en-IN')}</p>
                 </div>
               </div>
+            </Card>
+
+            {/* Variants Card */}
+            <Card className="bg-white shadow-sm border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-purple-600" />
+                  Product Variants
+                </h2>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-purple-300 text-purple-600 hover:bg-purple-50 text-xs"
+                  onClick={() => setIsVariantManagerOpen(true)}
+                >
+                  Manage
+                </Button>
+              </div>
+
+              {isLoadingVariants ? (
+                <div className="text-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto text-purple-500" />
+                  <p className="text-sm text-gray-400 mt-2">Loading variants...</p>
+                </div>
+              ) : variants.length === 0 ? (
+                <div className="text-center py-6">
+                  <Package className="w-8 h-8 mx-auto text-gray-300 mb-2" />
+                  <p className="text-sm text-gray-500">No variants configured yet.</p>
+                  <p className="text-xs text-gray-400 mt-1">Add pack sizes, loose options, or variant pricing.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {variants.map((variant) => {
+                    const unitType = variant.unitType || 'count';
+                    const baseLabel = unitType === 'weight' ? 'g' : unitType === 'volume' ? 'ml' : 'pcs';
+                    const stockBase = variant.stockInBaseUnit || 0;
+                    const stockDisplay =
+                      unitType === 'weight' && stockBase >= 1000
+                        ? `${(stockBase / 1000).toFixed(2)} kg`
+                        : unitType === 'volume' && stockBase >= 1000
+                          ? `${(stockBase / 1000).toFixed(2)} L`
+                          : `${stockBase} ${baseLabel}`;
+                    const packLabel = variant.isLoose
+                      ? 'Loose'
+                      : unitType === 'weight' && variant.packSizeInBaseUnit >= 1000
+                        ? `${variant.packSizeInBaseUnit / 1000} kg`
+                        : unitType === 'volume' && variant.packSizeInBaseUnit >= 1000
+                          ? `${variant.packSizeInBaseUnit / 1000} L`
+                          : `${variant.packSizeInBaseUnit} ${baseLabel}`;
+                    const packs = variant.isLoose ? null : Math.floor(stockBase / (variant.packSizeInBaseUnit || 1));
+                    const unitIcon = unitType === 'weight'
+                      ? <Scale className="w-3.5 h-3.5" />
+                      : unitType === 'volume'
+                        ? <Droplets className="w-3.5 h-3.5" />
+                        : <Hash className="w-3.5 h-3.5" />;
+
+                    return (
+                      <div
+                        key={variant.id}
+                        className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50/50 hover:bg-gray-100/50 transition-colors"
+                      >
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          variant.isLoose ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'
+                        }`}>
+                          {unitIcon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-sm text-gray-900 truncate">{variant.variantName}</p>
+                            {variant.isLoose && (
+                              <span className="text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-medium flex-shrink-0">
+                                Loose
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {packLabel} &middot; Stock: <span className="font-medium text-gray-700">{stockDisplay}</span>
+                            {packs !== null && <span className="text-gray-400"> ({packs} packs)</span>}
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-sm font-semibold text-green-700">₹{variant.sellingPrice}</p>
+                          {variant.costPrice > 0 && (
+                            <p className="text-[10px] text-gray-400">Cost: ₹{variant.costPrice}</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center gap-4 pt-2 text-xs text-gray-400">
+                    <span>Base unit: <strong className="text-gray-600">{variantsBaseUnit}</strong></span>
+                    <span>{variants.length} active variant{variants.length !== 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+              )}
             </Card>
 
             {/* Sales Performance Card */}
@@ -961,6 +1141,17 @@ export function ProductDetail() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Variant Manager Dialog */}
+      <VariantManager
+        product={product}
+        isOpen={isVariantManagerOpen}
+        onClose={() => setIsVariantManagerOpen(false)}
+        onProductUpdated={(updatedProduct) => {
+          setProduct(prev => prev ? { ...prev, ...updatedProduct } : prev);
+          loadVariants();
+        }}
+      />
     </div>
   );
 }
