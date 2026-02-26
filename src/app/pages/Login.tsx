@@ -549,7 +549,7 @@ export function Login() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="newPass">New Password</Label>
-              <Input id="newPass" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="•��••••••" />
+              <Input id="newPass" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirmPass">Confirm Password</Label>
