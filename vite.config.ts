@@ -1,19 +1,29 @@
 import { defineConfig } from 'vite'
-import path from 'path'
-import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
+// https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    // The React and Tailwind plugins are both required for Make, even if
-    // Tailwind is not being actively used – do not remove them
     react(),
     tailwindcss(),
+    {
+      // Strip Figma Make runtime scripts injected into index.html.
+      // These scripts (/_runtimes/*.js) only exist inside Figma's
+      // environment and cause Rollup to crash during Vercel builds.
+      name: 'remove-figma-runtime',
+      transformIndexHtml(html) {
+        return html.replace(/<script[^>]*\/_runtimes\/[^"'>]*["']?[^>]*><\/script>/g, '')
+      }
+    }
   ],
-  resolve: {
-    alias: {
-      // Alias @ to the src directory
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
 })
+```
+
+---
+
+**Step 3 — Commit**
+
+Scroll down, set the commit message to:
+```
+fix: strip Figma runtime script tag to unblock Vercel build
